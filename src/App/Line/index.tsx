@@ -5,10 +5,11 @@ import {CharView} from "../CharView";
 import {TagContentView} from "../TagContentView";
 import {TagPosition} from "../TagContentView/style";
 import {TagLineView} from "../TagLineView";
+import {GameChar} from "../Window";
 
 interface Props {
     // CaptionWindowで改行前で分割されたもの
-    chars: Char[]
+    chars: GameChar[]
     tags: Tag[]
 }
 
@@ -17,11 +18,16 @@ export const Line: FC<Props> = ({ chars, tags }) => {
         // そのtagのついているcharのリストを取得し、そのindexをとる
         const charIndexList:number[] = [];
         chars.map((char, index) => {
-           if(tag.pastedCharIds.includes(char.id)) {
+           if(tag.pastedCharIds.includes(char.char.id)) {
                charIndexList.push(index)
            }
            return false
         });
+
+        // そもそもタグが使われてないときは-1を返す
+        if(charIndexList.length == 0) {
+            return {startPosition: -1, lastPosition: -1};
+        }
 
         // tagの範囲としてindexの最大最小範囲を指定
         return {startPosition: Math.min(...charIndexList), lastPosition: Math.max(...charIndexList)}
@@ -30,18 +36,26 @@ export const Line: FC<Props> = ({ chars, tags }) => {
     return(
         <Style>
             {chars.map(
-                (char: Char):ReactElement => {
-                    return <CharView key={char.id} char={char}/>
+                (char: GameChar):ReactElement => {
+                    return <CharView key={char.char.id} char={char}/>
                 })
             }
             {tags.map(
-                (tag: Tag):ReactElement => {
-                    return <TagLineView key={tag.id} position={calcTagPosition(tag)} />
+                (tag: Tag):ReactElement|null => {
+                    const tagPosition: TagPosition = calcTagPosition(tag);
+                    if(tagPosition.startPosition === -1 && tagPosition.lastPosition === -1) {
+                        return null
+                    }
+                    return <TagLineView key={tag.id} position={tagPosition} />
                 }
             )}
             {tags.map(
-                (tag: Tag):ReactElement => {
-                    return <TagContentView key={tag.id} tag={tag} position={calcTagPosition(tag)} />
+                (tag: Tag):ReactElement|null => {
+                    const tagPosition: TagPosition = calcTagPosition(tag);
+                    if(tagPosition.startPosition === -1 && tagPosition.lastPosition === -1) {
+                        return null
+                    }
+                    return <TagContentView key={tag.id} tag={tag} position={tagPosition} />
                 }
             )}
         </Style>
