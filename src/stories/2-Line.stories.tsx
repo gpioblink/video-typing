@@ -1,7 +1,7 @@
 import React from 'react';
 import {Line} from "../App/Line";
-import {Char, Tag} from "../index";
-import {GameChar} from "../App/Window";
+import {Char, Tag, TagContent} from "../index";
+import {GameChar, TypingStatus} from "../App/Window";
 
 export default {
     title: 'Line',
@@ -190,17 +190,29 @@ export const CharsData: Char[] = [
     }
 ];
 
-export const GameCharsData = (): GameChar[] => {
+export const GameCharsData = (status: TypingStatus): GameChar[] => {
     const gameChars: GameChar[] = [];
     CharsData.forEach(
         (char) => {
-            gameChars.push({char: char, input: '', status: "finished"})
+            gameChars.push({char: char, input: '_', status: status})
         }
     );
     return gameChars;
 };
 
 
-export const ToLine = () => (
-    <Line chars={GameCharsData()} tags={TagsData} />
+export const Wait = () => (
+    <Line chars={GameCharsData('wait')} tags={TagsData} />
+);
+
+export const Available = () => (
+    <Line chars={GameCharsData('available')} tags={TagsData} />
+);
+
+export const Mistaken = () => (
+    <Line chars={GameCharsData('mistaken')} tags={TagsData} />
+);
+
+export const Finish = () => (
+    <Line chars={GameCharsData('finished')} tags={TagsData} />
 );

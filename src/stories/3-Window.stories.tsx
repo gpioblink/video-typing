@@ -20,6 +20,11 @@ export const TagsData: Tag[] = [
         pastedCharIds: ['29','30','31','32'],
         content: 'spelling'
     },
+    {
+        id: 'df4t4grf-9bb9-464e-8b91-0daed84b0eab',
+        pastedCharIds: ['1110','1111','1112','1113','1114'],
+        content: 'unaudible'
+    },
 ];
 
 export const CharsData: Char[] = [
@@ -191,56 +196,56 @@ export const CharsData: Char[] = [
     {
         id: '8888',
         char: '\n',
-        isTypeable: true
+        isTypeable: false
     },
     {
         id: '1110',
-        char: '[',
-        isTypeable: false
+        char: 'w',
+        isTypeable: true
     },
     {
         id: '1111',
-        char: 'L',
-        isTypeable: false
+        char: 'h',
+        isTypeable: true
     },
     {
         id: '1112',
-        char: 'I',
-        isTypeable: false
+        char: 'o',
+        isTypeable: true
     },
     {
         id: '1113',
-        char: 'L',
+        char: "'",
         isTypeable: false
     },
     {
         id: '1114',
-        char: 'I',
-        isTypeable: false
+        char: 's',
+        isTypeable: true
     },
     {
         id: '1115',
-        char: ']',
-        isTypeable: false
-    },
-    {
-        id: '1116',
         char: ' ',
         isTypeable: false
     },
     {
+        id: '1116',
+        char: 'o',
+        isTypeable: true
+    },
+    {
         id: '1117',
-        char: 'I',
+        char: 'n',
         isTypeable: true
     },
     {
         id: '1118',
-        char: "`",
-        isTypeable: false
+        char: "l",
+        isTypeable: true
     },
     {
         id: '1119',
-        char: 'm',
+        char: 'y',
         isTypeable: true
     },
     {
@@ -250,17 +255,17 @@ export const CharsData: Char[] = [
     },
     {
         id: '111',
-        char: 'a',
+        char: 'e',
         isTypeable: true
     },
     {
         id: '112',
-        char: ' ',
-        isTypeable: false
+        char: 'v',
+        isTypeable: true
     },
     {
         id: '113',
-        char: 'w',
+        char: 'e',
         isTypeable: true
     },
     {
@@ -270,96 +275,71 @@ export const CharsData: Char[] = [
     },
     {
         id: '115',
-        char: 'e',
-        isTypeable: true
+        char: ' ',
+        isTypeable: false
     },
     {
         id: '116',
-        char: 't',
+        char: 'l',
         isTypeable: true
     },
     {
         id: '117',
-        char: 'c',
-        isTypeable: true
-    },
-    {
-        id: '118',
-        char: 'h',
-        isTypeable: true
-    },
-    {
-        id: '119',
-        char: 'e',
-        isTypeable: true
-    },
-    {
-        id: '120',
-        char: 'd',
-        isTypeable: true
-    },
-    {
-        id: '121',
-        char: ' ',
-        isTypeable: false
-    },
-    {
-        id: '122',
-        char: 'l',
-        isTypeable: true
-    },
-    {
-        id: '123',
         char: 'i',
         isTypeable: true
     },
     {
-        id: '124',
-        char: 't',
-        isTypeable: true
-    },
-    {
-        id: '125',
-        char: 't',
-        isTypeable: true
-    },
-    {
-        id: '126',
-        char: 'l',
-        isTypeable: true
-    },
-    {
-        id: '127',
+        id: '118',
         char: 'e',
         isTypeable: true
     },
     {
-        id: '128',
+        id: '119',
+        char: 'd',
+        isTypeable: true
+    },
+    {
+        id: '120',
         char: ' ',
         isTypeable: false
     },
     {
-        id: '129',
-        char: 'p',
+        id: '121',
+        char: 't',
         isTypeable: true
     },
     {
-        id: '130',
-        char: 'r',
+        id: '122',
+        char: 'o',
         isTypeable: true
     },
     {
-        id: '131',
+        id: '123',
+        char: ' ',
+        isTypeable: false
+    },
+    {
+        id: '124',
+        char: 'y',
+        isTypeable: true
+    },
+    {
+        id: '125',
+        char: 'o',
+        isTypeable: true
+    },
+    {
+        id: '126',
         char: 'u',
         isTypeable: true
     },
     {
-        id: '132',
-        char: 'm',
-        isTypeable: true
+        id: '127',
+        char: '!',
+        isTypeable: false
     }
 ];
 
-export const ToWindow = () => (
+export const Default = () => (
     <Window frame={ {caption: CharsData, tags: TagsData, id: 'frgersgsr'} } sendCompleted={action('finishGame')}/>
 );
