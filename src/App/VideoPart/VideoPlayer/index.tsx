@@ -19,6 +19,8 @@ export interface VideoPlayerProps {
 export type PlayMode = "standard" | "slow" | "native"
 interface Props {
     mode: PlayMode;
+    startTime?: number;
+    endTime?: number;
     playerProps: VideoPlayerProps;
 }
 
@@ -26,9 +28,19 @@ interface State {
     player: videojs.Player;
 }
 
-export const VideoPlayer: FC<Props> = ({mode, playerProps}) => {
+export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) => {
     const [state, setState] = useState<State>();
     const videoNode = createRef<HTMLVideoElement>();
+
+    const onTimeUpdated = () => {
+        const time = videoNode.current?.currentTime;
+        const start:number = startTime || 0;
+        const end:number = endTime || videoNode.current?.duration || -1;
+
+        if (videoNode.current && time && (time < start || time >= end) ) {
+            videoNode.current.currentTime = start;
+        }
+    };
 
     useEffect(() => {
         // init player
@@ -69,7 +81,7 @@ export const VideoPlayer: FC<Props> = ({mode, playerProps}) => {
 
     return (
         <div>
-            <video ref={videoNode} className="video-js" />
+            <video ref={videoNode} onTimeUpdate={onTimeUpdated} className="video-js" />
         </div>
     )
 };
