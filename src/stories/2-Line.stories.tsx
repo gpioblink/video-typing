@@ -1,7 +1,7 @@
 import React from 'react';
-import {Line} from "../App/Line";
+import {Line} from "../App/TypingPart/Line";
 import {Char, Tag, TagContent} from "../index";
-import {GameChar, TypingStatus} from "../App/Window";
+import {GameChar, TypingStatus} from "../App/TypingPart/Window";
 
 export default {
     title: 'Line',

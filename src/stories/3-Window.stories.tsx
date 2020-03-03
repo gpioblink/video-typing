@@ -1,5 +1,5 @@
 import React from 'react';
-import {GameChar, Window} from "../App/Window";
+import {GameChar, Window} from "../App/TypingPart/Window";
 import {Char, Tag} from "../index";
 import {action} from "@storybook/addon-actions";
 

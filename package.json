@@ -13,7 +13,8 @@
     "react": "^16.12.0",
     "react-dom": "^16.12.0",
     "react-scripts": "3.4.0",
-    "typescript": "~3.7.2"
+    "typescript": "~3.7.2",
+    "video.js": "^7.6.6"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -45,6 +46,7 @@
     "@storybook/addon-links": "^5.3.13",
     "@storybook/addons": "^5.3.13",
     "@storybook/preset-create-react-app": "^1.5.2",
-    "@storybook/react": "^5.3.13"
+    "@storybook/react": "^5.3.13",
+    "@types/video.js": "^7.3.3"
   }
 }
