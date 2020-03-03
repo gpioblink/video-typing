@@ -1,4 +1,4 @@
-import {Tag} from "../../index";
+import {Tag} from "../../../index";
 import React, {FC} from "react";
 import {Style, TagPosition} from "./style";
 

@@ -1,7 +1,7 @@
 import React, {FC, ReactElement, useState} from "react";
-import {CaptionFrame, Char, Tag} from "../../index";
+import {CaptionFrame, Char, Tag} from "../../../index";
 import {Style} from "./style";
-import {Line} from "../Line";
+import {Line} from "../Line/index";
 
 export type TypingStatus = 'wait' | 'available' | 'mistaken' | 'finished'
 export interface GameChar {

@@ -1,5 +1,5 @@
 import React, {FC, ReactElement} from "react";
-import {Char, ID, Tag} from "../../index";
+import {Char, ID, Tag} from "../../../index";
 import {Style} from "./style";
 import {CharView} from "../CharView";
 import {TagContentView} from "../TagContentView";
