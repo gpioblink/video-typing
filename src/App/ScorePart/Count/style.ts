@@ -5,14 +5,14 @@ export const Layout = styled.div`
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 5%;
+  padding: 2%;
  .score {
    width: 25%;
-   font-size: 4vw;
+   font-size: 1vw;
    text-align: center;
-   height: 10vw;
+   height: 3vw;
  }
  .number {
-   font-size: 6vw;
+   font-size: 2vw;
  }
 `;

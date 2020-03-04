@@ -2,13 +2,13 @@ import styled from '@emotion/styled'
 
 export const Layout = styled.div`
   background-color: pink;
-  padding: 5%;
-  overflow: hidden;
+  padding: 3%;
   
  .mode {
    font-size: 3vw;
    animation: scroll 10s linear infinite;
    white-space: nowrap;
+   position: absolute;
  }
  
  .window {

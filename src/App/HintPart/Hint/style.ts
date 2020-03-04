@@ -5,13 +5,15 @@ export const Layout = styled.div`
   display: flex;
   flex-direction: column;
   overflow-y: scroll;
+  height: 45vw;
+  
   .item {
     padding: 4% 5% 2% 5%;
   }
   .title {
-    font-size: 5vw;
+    font-size: 3vw;
   }
   .content {
-    font-size: 4vw;
+    font-size: 2vw;
   }
 `;
