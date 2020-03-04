@@ -29,6 +29,11 @@ export interface Caption {
     caption: CaptionFrame[]
 }
 
+export interface DictionaryWord {
+    title: string;
+    content: string;
+}
+
 ReactDOM.render(<App />, document.getElementById('root'));
 
 // If you want your app to work offline and load faster, you can change
