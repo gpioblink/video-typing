@@ -15,7 +15,7 @@ export const Mode: FC<Props> = ({mode}) => {
             case "native":
                 return "[ミスx10] 頑張れ! ヒントとして日本語と英語を交互に再生しています";
         }
-        return "";
+        return "　";
     };
 
   return (

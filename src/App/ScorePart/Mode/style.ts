@@ -7,7 +7,6 @@ export const Layout = styled.div`
   
  .mode {
    font-size: 3vw;
-   height: 4vw;
    animation: scroll 10s linear infinite;
    white-space: nowrap;
  }
@@ -15,6 +14,7 @@ export const Layout = styled.div`
  .window {
    display: inline-flex;
    overflow: hidden;
+   height: 4vw;
    width: 100%;
  }
  
