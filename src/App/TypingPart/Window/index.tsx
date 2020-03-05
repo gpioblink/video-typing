@@ -1,4 +1,4 @@
-import React, {FC, ReactElement, useState} from "react";
+import React, {FC, ReactElement, useEffect, useState} from "react";
 import {CaptionFrame, Char, ID, Tag, TagContent} from "../../../index";
 import {Style} from "./style";
 import {Line} from "../Line";
@@ -61,6 +61,12 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
     const [state, setState] = useState({game:initializeGame(frame)} as States);
     const initKeyboardLog: KeyboardLog[] = [];
     const [keyboardState, setKeyboardState] = useState({keyboardLog: initKeyboardLog} as KeyboardLogState);
+
+    // キャプションが変わったら全部初期化し直し
+    useEffect(() => {
+        setState({game:initializeGame(frame)} as States);
+        setKeyboardState({keyboardLog: initKeyboardLog} as KeyboardLogState);
+    }, [frame.id]);
 
     const addKeyboardLog = (pressedKey: string, currentCharId: string, isCorrect: boolean): void => {
         const timeStamp = Date.now();

@@ -25,8 +25,9 @@ export interface CaptionFrame {
 }
 
 export interface Caption {
-    id: ID
-    caption: CaptionFrame[]
+    startTime: number;
+    endTime: number;
+    content: CaptionFrame
 }
 
 export interface DictionaryWord {
