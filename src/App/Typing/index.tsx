@@ -3,8 +3,6 @@ import {Style} from "./style"
 import {Window} from "../TypingPart/Window";
 import {CharsData, TagsData} from "../../stories/3-Window.stories";
 import {Score} from "../ScorePart/Score";
-import {Count} from "../ScorePart/Count";
-import {Mode} from "../ScorePart/Mode";
 import {Hint} from "../HintPart/Hint";
 import {DictionaryWordData} from "../../stories/8-Hint.stories";
 import {VideoPlayer} from "../VideoPart/VideoPlayer";

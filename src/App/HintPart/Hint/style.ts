@@ -11,9 +11,9 @@ export const Layout = styled.div`
     padding: 4% 5% 2% 5%;
   }
   .title {
-    font-size: 3vw;
+    font-size: 2vw;
   }
   .content {
-    font-size: 2vw;
+    font-size: 1vw;
   }
 `;
