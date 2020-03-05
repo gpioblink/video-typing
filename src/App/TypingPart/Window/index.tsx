@@ -1,5 +1,5 @@
 import React, {FC, ReactElement, useState} from "react";
-import {CaptionFrame, Char, Tag} from "../../../index";
+import {CaptionFrame, Char, ID, Tag, TagContent} from "../../../index";
 import {Style} from "./style";
 import {Line} from "../Line/index";
 
@@ -19,9 +19,22 @@ interface States {
     game: Game
 }
 
+export interface KeyboardLog {
+    timeStamp: number;
+    pushedKey: string;
+    currentCharId: ID;
+    isCorrect: boolean;
+}
+
+interface KeyboardLogState {
+    keyboardLog: KeyboardLog[]
+}
+
 interface Props {
-    frame: CaptionFrame
-    sendCompleted: () => void
+    frame: CaptionFrame;
+    sendCompleted: () => void; // TODO: 実際はステートを保存する用にCaptionFrameを返して親でセーブしてもらう
+    requestExplanation: (query: string) => void; // TODO: 実際は復習時に間違えた文とかも再確認できるようにid返しとかする。設計やり直したほうがいい気も。。
+    sendMistake: (reason: TagContent) => void; // TODO: 完全にプロトタイプ用。少なくともState自体を親階層に持ってくべきだと思う。若干親がキーボード判定処理で膨れるかなぁ？
 }
 
 const initializeGame = (frame: CaptionFrame):Game => {
@@ -38,8 +51,19 @@ const initializeGame = (frame: CaptionFrame):Game => {
     return {gameChars: gameChars, tag: frame.tags}
 };
 
-export const Window: FC<Props> = ({ frame, sendCompleted }) => {
+export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, sendMistake }) => {
     const [state, setState] = useState({game:initializeGame(frame)} as States);
+    const initKeyboardLog: KeyboardLog[] = [];
+    const [keyboardState, setKeyboardState] = useState({keyboardLog: initKeyboardLog} as KeyboardLogState);
+
+    const addKeyboardLog = (pressedKey: string, currentCharId: string, isCorrect: boolean): void => {
+        const timeStamp = Date.now();
+        setKeyboardState((keyboardState: KeyboardLogState) => {
+            const keyboardLogs = keyboardState.keyboardLog;
+            keyboardLogs.push({currentCharId: currentCharId, isCorrect: isCorrect, pushedKey: pressedKey, timeStamp: timeStamp});
+            return {keyboardLog: keyboardLogs}
+        });
+    };
 
     const splitCharsByNewLine = (chars: GameChar[]):GameChar[][] => {
         const splitedGameChars: GameChar[][] = [];
@@ -73,6 +97,9 @@ export const Window: FC<Props> = ({ frame, sendCompleted }) => {
                 // 入力が正解の場合
                 editingState.game.gameChars[inputIndex].status = 'finished';
 
+                // キーボード入力の保存
+                addKeyboardLog(e.key, state.game.gameChars[inputIndex].char.id, true);
+
                 // gameCharsの中でstateがwaitかつ書き換え可能1番若いものを取得し、availableにしてstateを更新
                 const waitIndex = state.game.gameChars.findIndex(gameChar => gameChar.status === "wait" && gameChar.char.isTypeable);
 
@@ -86,6 +113,9 @@ export const Window: FC<Props> = ({ frame, sendCompleted }) => {
             } else {
                 // 入力が不正解の場合
                 editingState.game.gameChars[inputIndex].status = 'mistaken';
+
+                // キーボード入力の保存
+                addKeyboardLog(e.key, state.game.gameChars[inputIndex].char.id, false);
             }
 
             return editingState;
