@@ -47,7 +47,10 @@ const initializeGame = (frame: CaptionFrame):Game => {
 
     // 最初の1回はここで: gameCharsの中でstateがwaitかつ書き換え可能1番若いものを取得し、availableにしてstateを更新
     const waitIndex = gameChars.findIndex(gameChar => gameChar.status === "wait" && gameChar.char.isTypeable);
-    gameChars[waitIndex].status = "available";
+
+    if(waitIndex !== -1) {
+        gameChars[waitIndex].status = "available";
+    }
 
     return {gameChars: gameChars, tag: frame.tags}
 };
@@ -147,6 +150,14 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
         return
     };
 
+    useEffect(() => {
+        // そもそも入力できるデータがない場合はすぐに終了して飛ばす
+        const isAnyTypeable = state.game.gameChars.filter( gameChar => gameChar.char.isTypeable).length !== 0;
+        if(!isAnyTypeable) {
+            sendCompleted();
+        }
+    }, []);
+
     const splitCharsByNewLine = (chars: GameChar[]):GameChar[][] => {
         const splitedGameChars: GameChar[][] = [];
         splitedGameChars.push([]);
@@ -186,15 +197,11 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
                 const waitIndex = state.game.gameChars.findIndex(gameChar => gameChar.status === "wait" && gameChar.char.isTypeable);
 
                 // 次の入力文字がない場合と次の文字がスペースなど入力不可能な文字な場合は区切とみなしてタグ付け判断をする
+                // const isAnyTypeable = state.game.gameChars.filter( gameChar => gameChar.char.isTypeable).length !== 0;
                 if(waitIndex === -1 || inputIndex+1 !== waitIndex) {
                     judgeTag(state.game.gameChars[inputIndex].char.id);
                 }
 
-                // もしなかったら、sendCompletedを親に通知して終了
-                if(waitIndex === -1) {
-                    sendCompleted();
-                    return editingState
-                }
                 editingState.game.gameChars[waitIndex].status = "available";
 
             } else {
