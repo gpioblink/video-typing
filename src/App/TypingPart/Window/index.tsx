@@ -152,6 +152,7 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
     };
 
     const focusWindow = () => {
+        // @ts-ignore
         keyboardElement.current.focus();
     };
 
