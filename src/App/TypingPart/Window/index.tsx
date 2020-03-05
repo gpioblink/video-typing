@@ -64,6 +64,7 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
     const [state, setState] = useState({game:initializeGame(frame)} as States);
     const initKeyboardLog: KeyboardLog[] = [];
     const [keyboardState, setKeyboardState] = useState({keyboardLog: initKeyboardLog} as KeyboardLogState);
+    const keyboardElement = React.createRef<HTMLDivElement>();
 
     // キャプションが変わったら全部初期化し直し
     useEffect(() => {
@@ -150,6 +151,15 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
         return
     };
 
+    const focusWindow = () => {
+        keyboardElement.current.focus();
+    };
+
+    useEffect(() => {
+            document.body.addEventListener('click', focusWindow); // 画面のどこかclickされたら入力状態へ
+        }
+    );
+
     useEffect(() => {
         // そもそも入力できるデータがない場合はすぐに終了して飛ばす
         const isAnyTypeable = state.game.gameChars.filter( gameChar => gameChar.char.isTypeable).length !== 0;
@@ -222,7 +232,7 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
     };
 
     return (
-        <Style onKeyPress={ e => onKeyPress(e) } tabIndex={0}>
+        <Style onKeyPress={ e => onKeyPress(e) } tabIndex={0} ref={keyboardElement}>
             {splitCharsByNewLine(state.game.gameChars).map(
                 (chars: GameChar[]):ReactElement => {
                     return <Line key={chars[0].char.id} chars={chars} tags={frame.tags}/>
