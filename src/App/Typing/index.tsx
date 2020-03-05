@@ -55,7 +55,7 @@ export const Typing: React.FC<Props> = ({caption, videoSources }) => {
             <div className="width ratio16-9">
                 <div className="grid">
                     <div className="video">
-                        <VideoPlayer mode={"standard"} startTime={caption[captionIndex].startTime} endTime={caption[captionIndex].endTime} playerProps={videoSources} />
+                        <div className="container"><VideoPlayer mode={"standard"} startTime={caption[captionIndex].startTime} endTime={caption[captionIndex].endTime} playerProps={videoSources} /></div>
                     </div>
                     <div className="typing">
                         <div className="box"><Window frame={ {caption: caption[captionIndex].content.caption, tags: caption[captionIndex].content.tags, id: caption[captionIndex].content.id } } sendCompleted={nextCaption} requestExplanation={searchDictionary} sendMistake={countMiss}/></div>

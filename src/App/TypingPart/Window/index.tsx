@@ -186,7 +186,7 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
 
             editingState.game.gameChars[inputIndex].input = e.key;
 
-            if(e.key === state.game.gameChars[inputIndex].char.char) {
+            if(e.key.toLowerCase() === state.game.gameChars[inputIndex].char.char.toLocaleLowerCase()) {
                 // 入力が正解の場合
                 editingState.game.gameChars[inputIndex].status = 'finished';
 
@@ -202,8 +202,13 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
                     judgeTag(state.game.gameChars[inputIndex].char.id);
                 }
 
-                editingState.game.gameChars[waitIndex].status = "available";
+                if(waitIndex !== -1) {
+                    editingState.game.gameChars[waitIndex].status = "available";
+                }
 
+                if(waitIndex === -1) {
+                    sendCompleted();
+                }
             } else {
                 // 入力が不正解の場合
                 editingState.game.gameChars[inputIndex].status = 'mistaken';

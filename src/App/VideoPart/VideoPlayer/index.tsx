@@ -1,11 +1,12 @@
 import React, {createRef, FC, ReactElement, useEffect, useState} from "react";
 import videojs from 'video.js';
+import "videojs-youtube/dist/Youtube.min";
 
 // ultra thanks https://gist.github.com/andrewserong/799db253ad6340201ef5130f4daeaa0f
 
 import 'video.js/dist/video-js.css'
 
-export type CodecMIME = "video/mp4" | "application/x-mpegURL"
+export type CodecMIME = "video/mp4" | "application/x-mpegURL" | "video/youtube"
 export interface VideoSource {
     src: string;
     type: CodecMIME;
@@ -37,7 +38,7 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
         const start:number = startTime || 0;
         const end:number = endTime || videoNode.current?.duration || -1;
 
-        if (videoNode.current && time && (time < start || time >= end) ) {
+        if (videoNode.current && time && (time+1 < start || time >= end) ) {
             videoNode.current.currentTime = start;
         }
     };
@@ -81,7 +82,7 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
 
     return (
         <div>
-            <video ref={videoNode} onTimeUpdate={onTimeUpdated} className="video-js" />
+            <video ref={videoNode} onTimeUpdate={onTimeUpdated} className="video-js vjs-16-9" />
         </div>
     )
 };

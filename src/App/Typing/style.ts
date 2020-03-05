@@ -56,6 +56,11 @@ background-color: red;
 .box {
   overflow: hidden;
  }
+ 
+ .container {
+  align-items: center;
+  justify-content: center;
+ }
 
 .spacer {
   flex-grow: 1;

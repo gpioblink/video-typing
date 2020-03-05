@@ -1,7 +1,6 @@
 import React from "react";
 import {Typing} from "../App/Typing";
-import {YoutubeMpegData} from "./4-VideoPlayer.stories";
-import {PokemonJson} from "./pokemon";
+import {PokemonJson, PokemonYoutubeMediaSource, PokemonYoutubeSource} from "./pokemon";
 
 export default {
     title: 'Typing',
@@ -10,5 +9,5 @@ export default {
 };
 
 export const Default = () => (
-    <Typing  caption={PokemonJson} videoSources={{sources: [YoutubeMpegData]}}/>
+    <Typing  caption={PokemonJson} videoSources={{sources: [PokemonYoutubeMediaSource]}}/>
 );
