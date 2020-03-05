@@ -1,7 +1,8 @@
 import React, {FC, ReactElement, useState} from "react";
 import {CaptionFrame, Char, ID, Tag, TagContent} from "../../../index";
 import {Style} from "./style";
-import {Line} from "../Line/index";
+import {Line} from "../Line";
+import {v1 as uuidv1} from 'uuid';
 
 export type TypingStatus = 'wait' | 'available' | 'mistaken' | 'finished'
 export interface GameChar {
@@ -20,7 +21,7 @@ interface States {
 }
 
 export interface KeyboardLog {
-    timeStamp: number;
+    timeStamp: number; // ホントはuuidv1使ったほうがいいのでは？
     pushedKey: string;
     currentCharId: ID;
     isCorrect: boolean;
@@ -51,6 +52,11 @@ const initializeGame = (frame: CaptionFrame):Game => {
     return {gameChars: gameChars, tag: frame.tags}
 };
 
+const CharArrayToString = (chars: Char[]): string => {
+    const stringArray = chars.map<string>(char => char.char);
+    return stringArray.join('')
+};
+
 export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, sendMistake }) => {
     const [state, setState] = useState({game:initializeGame(frame)} as States);
     const initKeyboardLog: KeyboardLog[] = [];
@@ -63,6 +69,76 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
             keyboardLogs.push({currentCharId: currentCharId, isCorrect: isCorrect, pushedKey: pressedKey, timeStamp: timeStamp});
             return {keyboardLog: keyboardLogs}
         });
+    };
+
+    const addTag = (tag: Tag) => { // TODO: 本当は親自体にもタグを追加する
+        setState((state: States) => {
+            const currentTag = state.game.tag;
+            currentTag.push(tag);
+            return { game: { gameChars: state.game.gameChars, tag: currentTag } }
+        });
+    };
+
+    const judgeTag = (currentCharId: ID) => { // TODO: この関数絶対粒度変だろ
+        // currentCharIdのキャプション上のインデックスを取得
+        const charIndexOnCaption = frame.caption.findIndex(captionChar => captionChar.id === currentCharId);
+        if(charIndexOnCaption === -1) {
+            return;
+        }
+
+        // currentCharIdを含み直前の入力不可能文字までのcharIdを取得
+        const targetCharIds:string[] = [];
+        let wordHeadIndex = 0;
+        for(wordHeadIndex = charIndexOnCaption; wordHeadIndex >= 0; wordHeadIndex--) {
+            if(!frame.caption[wordHeadIndex].isTypeable) {
+                break;
+            }
+            targetCharIds.push(frame.caption[wordHeadIndex].id);
+        }
+
+        // useId上のkeyboardLogの取得
+        const targetKeyboardLogs: KeyboardLog[] = keyboardState.keyboardLog.filter(keyLog => targetCharIds.includes(keyLog.currentCharId));
+
+        // 以下、プロトタイプ用Tag判定ロジック
+
+        // 1. その単語内で全て正解していた場合は何もしない
+        if(targetKeyboardLogs.filter(keyLog => !keyLog.isCorrect).length === 0) {
+            return
+        }
+
+        // この時点でミスしているのは確実なので、解説表示を要求する
+        requestExplanation(CharArrayToString(frame.caption.slice(wordHeadIndex+1)));
+
+        // 2. falseの数がその単語内で2回までの場合は「スペルミス」判定
+        if(targetKeyboardLogs.filter(keyLog => !keyLog.isCorrect).length <= 2) {
+            addTag({content: "spelling", id: uuidv1(), pastedCharIds: targetCharIds});
+            sendMistake("spelling");
+            return
+        }
+
+        // 3. 特定の1文字で3回以上間違えている場合は「アンオーディブル」判定
+        // TODO: lodashでも使ったら？
+        if(targetCharIds.filter(charId => {
+            return targetKeyboardLogs.filter(keyLog => !keyLog.isCorrect && keyLog.currentCharId === charId).length >= 3
+        }).length > 0) {
+            addTag({content: "unaudible", id: uuidv1(), pastedCharIds: targetCharIds});
+            sendMistake("unaudible");
+            return
+        }
+
+        // 4. 3文字以上の場所で間違えている場合は「イグノランス」判定
+        if(targetCharIds.filter(charId => {
+            return targetKeyboardLogs.filter(keyLog => !keyLog.isCorrect && keyLog.currentCharId === charId).length > 0
+        }).length > 0) {
+            addTag({content: "ignorance", id: uuidv1(), pastedCharIds: targetCharIds});
+            sendMistake("ignorance");
+            return
+        }
+
+        // 5. いずれにも該当しないミスは「その他」判定
+        addTag({content: "others", id: uuidv1(), pastedCharIds: targetCharIds});
+        sendMistake("others");
+        return
     };
 
     const splitCharsByNewLine = (chars: GameChar[]):GameChar[][] => {
@@ -102,6 +178,11 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
 
                 // gameCharsの中でstateがwaitかつ書き換え可能1番若いものを取得し、availableにしてstateを更新
                 const waitIndex = state.game.gameChars.findIndex(gameChar => gameChar.status === "wait" && gameChar.char.isTypeable);
+
+                // 次の入力文字がない場合と次の文字がスペースなど入力不可能な文字な場合は区切とみなしてタグ付け判断をする
+                if(waitIndex === -1 || inputIndex+1 !== waitIndex) {
+                    judgeTag(state.game.gameChars[inputIndex].char.id);
+                }
 
                 // もしなかったら、sendCompletedを親に通知して終了
                 if(waitIndex === -1) {

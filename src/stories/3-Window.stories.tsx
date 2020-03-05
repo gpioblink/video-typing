@@ -10,21 +10,21 @@ export default {
 };
 
 export const TagsData: Tag[] = [
-    {
-        id: 'b6949777-91f3-4209-95d8-ee3efcd67a9f',
-        pastedCharIds: ['13','14','15','16','17','18','19','20'],
-        content: 'unaudible'
-    },
-    {
-        id: '378d9486-9bb9-464e-8b91-0daed84b0eab',
-        pastedCharIds: ['29','30','31','32'],
-        content: 'spelling'
-    },
-    {
-        id: 'df4t4grf-9bb9-464e-8b91-0daed84b0eab',
-        pastedCharIds: ['1110','1111','1112','1113','1114'],
-        content: 'unaudible'
-    },
+    // {
+    //     id: 'b6949777-91f3-4209-95d8-ee3efcd67a9f',
+    //     pastedCharIds: ['13','14','15','16','17','18','19','20'],
+    //     content: 'unaudible'
+    // },
+    // {
+    //     id: '378d9486-9bb9-464e-8b91-0daed84b0eab',
+    //     pastedCharIds: ['29','30','31','32'],
+    //     content: 'spelling'
+    // },
+    // {
+    //     id: 'df4t4grf-9bb9-464e-8b91-0daed84b0eab',
+    //     pastedCharIds: ['1110','1111','1112','1113','1114'],
+    //     content: 'unaudible'
+    // },
 ];
 
 export const CharsData: Char[] = [
@@ -341,5 +341,5 @@ export const CharsData: Char[] = [
 ];
 
 export const Default = () => (
-    <Window frame={ {caption: CharsData, tags: TagsData, id: 'frgersgsr'} } sendCompleted={action('finishGame')}/>
+    <Window frame={ {caption: CharsData, tags: TagsData, id: 'frgersgsr'} } sendCompleted={action('finishGame')} requestExplanation={action('requested')} sendMistake={action('tagged')} />
 );

@@ -5,10 +5,25 @@ import {CharsData, TagsData} from "../../stories/3-Window.stories";
 import {Score} from "../ScorePart/Score";
 import {Hint} from "../HintPart/Hint";
 import {DictionaryWordData} from "../../stories/8-Hint.stories";
-import {VideoPlayer} from "../VideoPart/VideoPlayer";
+import {VideoPlayer, VideoPlayerProps} from "../VideoPart/VideoPlayer";
 import {YoutubeMpegData} from "../../stories/4-VideoPlayer.stories";
+import {Caption, CaptionFrame, DictionaryWord, Tag} from "../../index";
 
-export const Typing: React.FC = () => {
+interface State {
+    tags: Tag[];
+
+}
+
+interface Props {
+    caption: Caption; // TODO: captionFrame.tagsは本来こっちのデータにはいらないものだから別の場所に格納したい。
+    videoSources: VideoPlayerProps;
+    searchDictionary: (query: CaptionFrame, missId: string[]) => DictionaryWord[];
+}
+
+export const Typing: React.FC<Props> = ({caption, videoSources, searchDictionary}) => {
+
+
+
     return (
         <Style>
             <div className="width ratio16-9">

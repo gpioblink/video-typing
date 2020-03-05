@@ -46,7 +46,7 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
         // init player
         const defaultOptions: videojs.PlayerOptions = {
             autoplay: true,
-            controls: false,
+            controls: true,
             fluid: true,
             preload: 'auto',
             html5: {
