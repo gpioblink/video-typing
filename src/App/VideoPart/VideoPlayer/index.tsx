@@ -78,7 +78,7 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
                 state?.player.src(playerProps.sources);
             }
         }
-    }, [mode]);
+    }, [mode, playerProps]);
 
     return (
         <div>
