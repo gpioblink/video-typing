@@ -152,8 +152,9 @@ export const Window: FC<Props> = ({ frame, sendCompleted, requestExplanation, se
     };
 
     const focusWindow = () => {
-        // @ts-ignore
-        keyboardElement.current.focus();
+        if(keyboardElement.current !== null) {
+            keyboardElement.current.focus();
+        }
     };
 
     useEffect(() => {
