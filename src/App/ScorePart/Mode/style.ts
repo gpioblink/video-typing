@@ -16,6 +16,7 @@ export const Layout = styled.div`
    overflow: hidden;
    height: 4vw;
    width: 100%;
+   position: sticky;
  }
  
  @keyframes scroll{
