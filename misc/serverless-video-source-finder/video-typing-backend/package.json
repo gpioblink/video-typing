@@ -11,6 +11,7 @@
   "dependencies": {
     "bluebird": "^3.7.2",
     "middy": "^0.33.2",
+    "serverless-python-requirements": "^5.1.0",
     "uuid": "^7.0.2"
   }
 }

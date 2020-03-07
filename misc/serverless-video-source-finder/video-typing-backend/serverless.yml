@@ -20,9 +20,15 @@ service: video-typing
 # Check out our docs for more details
 # frameworkVersion: "=X.X.X"
 
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux
+
 provider:
   name: aws
-  runtime: nodejs10.x
   stage: dev
   region: ap-northeast-1
   environment:
@@ -72,6 +78,9 @@ provider:
 functions:
   getVideoFromUrl:
     runtime: python3.8
+    memorySize: 128
+    timeout: 30 # api gateway allow up to 30 sec
+    description: get video source infromation from your video url
     handler: python_api/handler.get_sources
     events:
       - http:
@@ -79,15 +88,17 @@ functions:
          method: post
          cors: true
   saveVideoCache:
+    runtime: nodejs10.x
     handler: api/user.saveVideoCache
     memorySize: 128
-    description: get video source information from your video url
+    description: save video source information for local table
     events:
      - http:
         path: user/save-video-source
         method: post
         cors: true
   getVideoCacheFromUrl:
+    runtime: nodejs10.x
     handler: api/user.getVideoCache
     memorySize: 128
     description: get video source cache information using local table 

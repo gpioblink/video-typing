@@ -63,3 +63,6 @@ def get_sources(event, context):
         },
         'body': json.dumps({"error": "no url was specified"})
     }
+
+if __name__ == "__main__":
+    print(get_sources({"body": "{\"url\": \"https://www.youtube.com/watch?v=6xKWiCMKKJg\"}"}, ''))
