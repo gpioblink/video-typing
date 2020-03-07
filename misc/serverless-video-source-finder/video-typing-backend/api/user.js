@@ -70,3 +70,28 @@ const videoSourceInfo = (siteUrl, sourceJson) => {
     updatedAt: timestamp,
   };
 };
+
+module.exports.getVideoCache = (event, context, callback) => {
+  const requestBody = JSON.parse(event.body);
+  const siteUrl = requestBody.url;
+  const params = {
+    TableName: process.env.VIDEO_TYPING_TABLE,
+    Key: {
+      id: siteUrl,
+    },
+  };
+
+  dynamoDb.get(params).promise()
+   .then(result => {
+     const response = {
+       statusCode: 200,
+       body: JSON.stringify(result.Item),
+     };
+     callback(null, response);
+   })
+   .catch(error => {
+     console.error(error);
+     callback(new Error('Couldn\'t fetch video source'));
+     return;
+   });
+};

@@ -78,6 +78,14 @@ functions:
      - http:
         path: user/get-video-source
         method: post
+  getVideoCacheFromUrl:
+    handler: api/user.getVideoCache
+    memorySize: 128
+    description: get video source cache information using local table 
+    events:
+      - http:
+         path: user/get-video-source-cache
+         method: post
        
 #    The following are a few example events you can configure
 #    NOTE: Please make sure to change your handler code to work with those events
