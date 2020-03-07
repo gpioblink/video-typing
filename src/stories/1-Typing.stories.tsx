@@ -14,7 +14,7 @@ export const Default = () => {
     const url = "https://www.youtube.com/watch?v=6xKWiCMKKJg";
 
     useEffect(() => {
-        fetch("https://fesa02fzvb.execute-api.ap-northeast-1.amazonaws.com/default/video-typing-source-finder-ap-northeast-1", {
+        fetch("https://eye1zoqjwb.execute-api.ap-northeast-1.amazonaws.com/dev/user/get-video-source", {
             method: "POST", // *GET, POST, PUT, DELETE, etc.
             mode: "cors", // no-cors, cors, *same-origin
             headers: {
