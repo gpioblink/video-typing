@@ -70,6 +70,14 @@ provider:
 #    - exclude-me-dir/**
 
 functions:
+  getVideoFromUrl:
+    runtime: python3.8
+    handler: python_api/handler.get_sources
+    events:
+      - http:
+         path: user/get-video-source-real
+         method: post
+         cors: true
   saveVideoCache:
     handler: api/user.saveVideoCache
     memorySize: 128
@@ -87,6 +95,7 @@ functions:
       - http:
          path: user/get-video-source-cache
          method: post
+         cors: true
        
 #    The following are a few example events you can configure
 #    NOTE: Please make sure to change your handler code to work with those events
