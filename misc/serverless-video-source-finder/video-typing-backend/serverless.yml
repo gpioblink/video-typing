@@ -100,33 +100,33 @@ functions:
     timeout: 30 # api gateway allow up to 30 sec
     description: get video source infromation from your video url
     handler: python_api/handler.get_sources
-    events:
-      - http:
-         path: user/get-video-source-real
-         method: post
-         cors: true
+    # events:
+    #   - http:
+    #      path: user/get-video-source-real
+    #      method: post
+    #      cors: true
   saveVideoCache:
     runtime: nodejs10.x
     handler: api/user.saveVideoCache
     memorySize: 128
     name: ${self:service}-${self:provider.stage}-video-from-url-save-a
     description: save video source information for local table
-    events:
-     - http:
-        path: user/save-video-source
-        method: post
-        cors: true
+    # events:
+    #  - http:
+    #     path: user/save-video-source
+    #     method: post
+    #     cors: true
   getVideoCacheFromUrl:
     runtime: nodejs10.x
     handler: api/user.getVideoCache
     memorySize: 128
     name: ${self:service}-${self:provider.stage}-video-from-url-cache-a
     description: get video source cache information using local table 
-    events:
-      - http:
-         path: user/get-video-source-cache
-         method: post
-         cors: true
+    # events:
+    #   - http:
+    #      path: user/get-video-source-cache
+    #      method: post
+    #      cors: true
        
 #    The following are a few example events you can configure
 #    NOTE: Please make sure to change your handler code to work with those events
