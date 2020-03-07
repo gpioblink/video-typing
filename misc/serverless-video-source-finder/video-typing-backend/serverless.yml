@@ -23,6 +23,8 @@ service: video-typing
 provider:
   name: aws
   runtime: nodejs10.x
+  stage: dev
+  region: ap-northeast-1
 
 # you can overwrite defaults here
 #  stage: dev
@@ -58,8 +60,15 @@ provider:
 #    - exclude-me-dir/**
 
 functions:
-  hello:
-    handler: handler.hello
+  getVideoFromUrl:
+    handler: api/user.getvideo
+    memorySize: 128
+    description: get video source information from your video url
+    events:
+     - http:
+        path: user/get-video-source
+        method: post
+       
 #    The following are a few example events you can configure
 #    NOTE: Please make sure to change your handler code to work with those events
 #    Check the event documentation for details
