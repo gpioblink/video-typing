@@ -7,7 +7,7 @@ AWS.config.setPromisesDependency(require('bluebird'));
 
 const dynamoDb = new AWS.DynamoDB.DocumentClient();
 
-module.exports.getvideo = (event, context, callback) => {
+module.exports.saveVideoCache = (event, context, callback) => {
   const requestBody = JSON.parse(event.body);
   const siteUrl = requestBody.url;
   const sourceJson = requestBody.source;

@@ -70,13 +70,13 @@ provider:
 #    - exclude-me-dir/**
 
 functions:
-  getVideoFromUrl:
-    handler: api/user.getvideo
+  saveVideoCache:
+    handler: api/user.saveVideoCache
     memorySize: 128
     description: get video source information from your video url
     events:
      - http:
-        path: user/get-video-source
+        path: user/save-video-source
         method: post
         cors: true
   getVideoCacheFromUrl:
