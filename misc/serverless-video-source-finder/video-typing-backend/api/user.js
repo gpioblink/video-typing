@@ -13,13 +13,11 @@ const lambda = new AWS.Lambda({
 
 module.exports.getVideoService = async (event, context) => {
   const cache = await invokeCacheVideo(event.body);
-  console.log("cache_res", cache);
 
   if(cache['Payload']) {
     const payload = JSON.parse(cache['Payload']);
     if(payload.body) {
       const body = JSON.parse(payload.body);
-      console.log("body_cache_res", body);
       if(!body['error'] && body['source']) {
         return {
           statusCode: 200,
@@ -31,7 +29,6 @@ module.exports.getVideoService = async (event, context) => {
   }
 
   const real = await invokeRealVideo(event.body); 
-  console.log("real_res_obj", real);
 
   if(real['Payload']) {
     const payload = JSON.parse(real['Payload']);
@@ -61,7 +58,6 @@ const invokeCacheVideo = body => {
     InvocationType: 'RequestResponse',
     Payload: JSON.stringify({'body': body})
   };
-  console.log("cachevideo", params);
   return lambda.invoke(params).promise();
 };
 
@@ -71,7 +67,6 @@ const invokeRealVideo = body => {
     InvocationType: 'RequestResponse',
     Payload: JSON.stringify({'body': body})
   };
-  console.log("invokevideo", params);
   return lambda.invoke(params).promise();
 };
 
@@ -81,7 +76,6 @@ const saveCacheVideo = body => {
     InvocationType: 'RequestResponse',
     Payload: JSON.stringify({'body': body})
   };
-  console.log("savevideo", params);
   return lambda.invoke(params).promise();
 };
 
@@ -109,7 +103,6 @@ module.exports.saveVideoCache = (event, context, callback) => {
      });
    })
    .catch(err => {
-     console.log(err);
      callback(null, {
        statusCode: 500,
        headers: {
