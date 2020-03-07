@@ -22,6 +22,9 @@ module.exports.getvideo = (event, context, callback) => {
    .then(res => {
      callback(null, {
        statusCode: 200,
+       headers: {
+        'Access-Control-Allow-Origin': '*',
+       },
        body: JSON.stringify({
          message: `Sucessfully submitted video source with siteUrl ${siteUrl}`
        })
@@ -31,6 +34,10 @@ module.exports.getvideo = (event, context, callback) => {
      console.log(err);
      callback(null, {
        statusCode: 500,
+       headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Credentials': true,
+       },
        body: JSON.stringify({
          message: `Unable to submit video source with siteUrl ${siteUrl}`
        })
@@ -85,6 +92,9 @@ module.exports.getVideoCache = (event, context, callback) => {
    .then(result => {
      const response = {
        statusCode: 200,
+       headers: {
+        'Access-Control-Allow-Origin': '*',
+       },
        body: JSON.stringify(result.Item),
      };
      callback(null, response);

@@ -78,6 +78,7 @@ functions:
      - http:
         path: user/get-video-source
         method: post
+        cors: true
   getVideoCacheFromUrl:
     handler: api/user.getVideoCache
     memorySize: 128

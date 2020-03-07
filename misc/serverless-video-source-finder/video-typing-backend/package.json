@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "bluebird": "^3.7.2",
+    "middy": "^0.33.2",
     "uuid": "^7.0.2"
   }
 }
