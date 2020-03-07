@@ -33,6 +33,10 @@ provider:
   region: ap-northeast-1
   environment:
     VIDEO_TYPING_TABLE: ${self:service}-${opt:stage, self:provider.stage}
+    LAMBDA_REGION: ${self:region, self:provider.region}
+    REAL_VIDEO_SOURCE_LAMBDA_NAME: ${self:functions.getVideoFromUrl.name}
+    CACHE_VIDEO_SOURCE_LAMBDA_NAME: ${self:functions.getVideoCacheFromUrl.name}
+    SAVE_VIDEO_SOURCE_LAMBDA_NAME: ${self:functions.saveVideoCache.name}
   iamRoleStatements:
     - Effect: Allow
       Action:
@@ -40,6 +44,7 @@ provider:
         - dynamodb:Scan
         - dynamodb:GetItem
         - dynamodb:PutItem
+        - lambda:InvokeFunction
       Resource: "*"
 
 # you can overwrite defaults here
@@ -76,9 +81,22 @@ provider:
 #    - exclude-me-dir/**
 
 functions:
+  getVideoService:
+    runtime: nodejs10.x
+    memorySize: 128
+    name: ${self:service}-${self:provider.stage}-video-from-url-service
+    timeout: 30
+    description: get video services controller
+    handler: api/user.getVideoService
+    events:
+      - http:
+         path: user/get-video-source
+         method: post
+         cors: true
   getVideoFromUrl:
     runtime: python3.8
     memorySize: 128
+    name: ${self:service}-${self:provider.stage}-video-from-url-real
     timeout: 30 # api gateway allow up to 30 sec
     description: get video source infromation from your video url
     handler: python_api/handler.get_sources
@@ -91,6 +109,7 @@ functions:
     runtime: nodejs10.x
     handler: api/user.saveVideoCache
     memorySize: 128
+    name: ${self:service}-${self:provider.stage}-video-from-url-save-a
     description: save video source information for local table
     events:
      - http:
@@ -101,6 +120,7 @@ functions:
     runtime: nodejs10.x
     handler: api/user.getVideoCache
     memorySize: 128
+    name: ${self:service}-${self:provider.stage}-video-from-url-cache-a
     description: get video source cache information using local table 
     events:
       - http:
