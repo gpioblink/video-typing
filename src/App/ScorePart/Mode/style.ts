@@ -1,8 +1,8 @@
 import styled from '@emotion/styled'
 
 export const Layout = styled.div`
-  background-color: pink;
-  padding: 3%;
+  background-color: #324851;
+  padding: 5% 5% 0 5%;
   
  .mode {
    font-size: 3vw;

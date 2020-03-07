@@ -4,7 +4,8 @@ import "videojs-youtube/dist/Youtube.min";
 
 // ultra thanks https://gist.github.com/andrewserong/799db253ad6340201ef5130f4daeaa0f
 
-import 'video.js/dist/video-js.css'
+import 'video.js/dist/video-js.css';
+import '@videojs/themes/dist/sea/index.css';
 
 export type CodecMIME = "video/mp4" | "application/x-mpegURL" | "video/youtube"
 export interface VideoSource {
@@ -46,8 +47,11 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
     useEffect(() => {
         // init player
         const defaultOptions: videojs.PlayerOptions = {
-            autoplay: true,
+            autoplay: false,
             controls: true,
+            controlBar: {
+                fullscreenToggle: false
+            },
             fluid: true,
             preload: 'auto',
             html5: {
@@ -82,7 +86,7 @@ export const VideoPlayer: FC<Props> = ({mode, startTime, endTime, playerProps}) 
 
     return (
         <div>
-            <video ref={videoNode} onTimeUpdate={onTimeUpdated} className="video-js vjs-16-9" />
+            <video ref={videoNode} onTimeUpdate={onTimeUpdated} className="video-js vjs-theme-sea vjs-16-9" />
         </div>
     )
 };

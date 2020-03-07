@@ -13,5 +13,5 @@ export const Style = styled.div<LayoutProps>`
     grid-row-start: line-start;
     grid-column-start: ${ (props: LayoutProps) => props.position.startPosition + 1 };
     grid-column-end: ${ (props: LayoutProps) => props.position.lastPosition + 2};
-    background-color: gray;
+    background-color: #86Ac41;
 `;

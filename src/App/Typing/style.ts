@@ -1,8 +1,8 @@
 import styled from '@emotion/styled';
 
 export const Style = styled.div`
-background-color: red;
-
+background-color: #7DA3A1;
+color: #DDDDDD;
 
 * {
   margin: 0;
@@ -28,6 +28,8 @@ background-color: red;
 .ratio16-9:before {padding-top: 56.25%;}
 
 .grid {
+  align-items: center;
+  justify-content: center;
   position: absolute;
   top: 0; left: 0; bottom: 0; right: 0;
   color: #444;
@@ -39,15 +41,13 @@ background-color: red;
 .video {
   grid-column: video-col-start / video-col-end;
   grid-row: video-row-start / video-row-end;
-  background-color: black;
+  background-color: #F2F2F2;
+  margin: 5%;
 }
 
 .typing {
   grid-column: video-col-start / video-col-end;
   grid-row: typing-row-start / typing-row-end;
-  background-color: yellow;
-  padding: 1%;
-  
   display: flex;
   align-items: center;
 }
@@ -66,9 +66,10 @@ background-color: red;
 }
 
 .info {
+  width: 95%;
+  height: 95%;
   grid-column: info-col-start / info-col-end;
   grid-row: video-row-start / typing-row-end;
-  background-color: green;
   display: flex;
   flex-direction: column;
 }
@@ -77,6 +78,10 @@ background-color: red;
   grid-column: info-col-start / info-col-end;
   grid-row: video-row-start / typing-row-end;
   background-color: blue;
+}
+
+.vjs-theme-sea .vjs-progress-control .vjs-play-progress {
+    background-color: rgba(134, 172, 65, .9);
 }
 
 `;

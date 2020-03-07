@@ -3,6 +3,7 @@ import styled from '@emotion/styled'
 export const Layout = styled.div`
 grid-column: auto;
 grid-row-start: text-start;
+color: #EEEEEE;
 
 .available {
     animation: blinker 1s step-start infinite;

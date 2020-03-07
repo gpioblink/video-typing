@@ -1,7 +1,6 @@
 import styled from '@emotion/styled'
 
 export const Style = styled.div`
-background-color: #F0F0F0;
 height: 6vw;
 display: grid;
 grid-template-columns: repeat(50, 1.5vw);

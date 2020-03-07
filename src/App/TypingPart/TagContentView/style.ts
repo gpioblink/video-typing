@@ -15,4 +15,5 @@ export const Style = styled.div<LayoutProps>`
  grid-column-end: ${ (props: LayoutProps) => props.position.lastPosition + 2};
  justify-self: center;
  font-size: 50%;
+ color: #86AC41;
 `;

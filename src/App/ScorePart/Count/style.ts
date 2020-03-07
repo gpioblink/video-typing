@@ -1,11 +1,11 @@
 import styled from '@emotion/styled'
 
 export const Layout = styled.div`
-  background-color: orange;
+  background-color: #324851;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 2%;
+  padding: 0 2% 5% 2%;
  .score {
    width: 25%;
    font-size: 1vw;
