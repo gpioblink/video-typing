@@ -1,0 +1,34 @@
+export type TagContent = 'unaudible' | 'ignorance' | 'spelling' | 'others';
+export type ID = string;
+
+export interface Tag {
+  id: ID;
+  pastedCharIds: ID[];
+  content: TagContent;
+}
+
+export interface Char {
+  id: ID;
+  char: string;
+  isTypeable: boolean;
+}
+
+export interface CaptionFrame {
+  id: ID;
+  caption: Char[];
+  tags: Tag[];
+}
+
+export interface DictionaryWord {
+  title: string;
+  content: string;
+}
+
+export type PanelKind = 'typing' | 'hint' | 'debug';
+
+export interface PanelPosition {
+  x: number;
+  y: number;
+}
+
+export type StoredPanelPositions = Record<string, Partial<Record<PanelKind, PanelPosition>>>;
