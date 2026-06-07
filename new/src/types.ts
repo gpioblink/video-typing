@@ -24,7 +24,7 @@ export interface DictionaryWord {
   content: string;
 }
 
-export type PanelKind = 'typing' | 'hint' | 'debug';
+export type PanelKind = 'typing' | 'hint' | 'debug' | 'subtitle';
 
 export interface PanelPosition {
   x: number;
@@ -32,3 +32,11 @@ export interface PanelPosition {
 }
 
 export type StoredPanelPositions = Record<string, Partial<Record<PanelKind, PanelPosition>>>;
+
+export type SubtitleFormat = 'srt' | 'ttml';
+
+export interface SubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}

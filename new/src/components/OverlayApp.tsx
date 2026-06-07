@@ -1,11 +1,14 @@
 import { CacheProvider } from '@emotion/react';
 import createCache from '@emotion/cache';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { DebugPanel } from './DebugPanel';
 import { DraggablePanel } from './DraggablePanel';
+import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockFrame, mockWords } from '../data/mockData';
+import { getVideoElement } from '../lib/video';
+import type { SubtitleCue } from '../types';
 
 interface Props {
   targetId: string;
@@ -13,12 +16,34 @@ interface Props {
 }
 
 export function OverlayApp({ shadowRoot, targetId }: Props) {
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+  const [subtitleFileName, setSubtitleFileName] = useState('');
+  const [subtitleError, setSubtitleError] = useState('');
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
   const cache = useMemo(() => {
     return createCache({
       key: 'video-typing',
       container: shadowRoot,
     });
   }, [shadowRoot]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const video = getVideoElement(targetId);
+      setCurrentTime(video?.currentTime || 0);
+      setDuration(video?.duration || 0);
+    }, 250);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [targetId]);
+
+  const activeCue = useMemo(() => {
+    return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
+  }, [currentTime, subtitleCues]);
 
   return (
     <CacheProvider value={cache}>
@@ -35,7 +60,29 @@ export function OverlayApp({ shadowRoot, targetId }: Props) {
           <Hint words={mockWords} />
         </DraggablePanel>
         <DraggablePanel kind="debug" title="Debug" defaultPosition={{ x: 24, y: 24 }}>
-          <DebugPanel targetId={targetId} />
+          <DebugPanel
+            targetId={targetId}
+            currentTime={currentTime}
+            duration={duration}
+            subtitleFileName={subtitleFileName}
+            subtitleError={subtitleError}
+            onSubtitleLoaded={(cues, fileName) => {
+              setSubtitleCues(cues);
+              setSubtitleFileName(fileName);
+              setSubtitleError('');
+            }}
+            onSubtitleError={(message) => {
+              setSubtitleCues([]);
+              setSubtitleFileName('');
+              setSubtitleError(message);
+            }}
+          />
+        </DraggablePanel>
+        <DraggablePanel kind="subtitle" title="Subtitle" defaultPosition={{ x: 180, y: 520 }}>
+          <SubtitlePanel
+            cueText={activeCue?.text || ''}
+            fileName={subtitleFileName}
+          />
         </DraggablePanel>
       </div>
     </CacheProvider>

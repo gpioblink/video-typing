@@ -1,25 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { getVideoElement, seekVideo } from '../lib/video';
+import { parseSubtitleFile } from '../lib/subtitles';
+import type { SubtitleCue } from '../types';
 
 interface Props {
   targetId: string;
+  currentTime: number;
+  duration: number;
+  subtitleFileName: string;
+  subtitleError: string;
+  onSubtitleLoaded: (cues: SubtitleCue[], fileName: string) => void;
+  onSubtitleError: (message: string) => void;
 }
 
-export function DebugPanel({ targetId }: Props) {
+export function DebugPanel({
+  targetId,
+  currentTime,
+  duration,
+  subtitleFileName,
+  subtitleError,
+  onSubtitleLoaded,
+  onSubtitleError,
+}: Props) {
   const [seekText, setSeekText] = useState('0');
-  const [currentTime, setCurrentTime] = useState(0);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setCurrentTime(getVideoElement(targetId)?.currentTime || 0);
-    }, 500);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [targetId]);
-
   const video = getVideoElement(targetId);
-  const duration = video?.duration || 0;
 
   return (
     <div style={{ display: 'grid', gap: 8, width: 220, fontFamily: 'system-ui, sans-serif' }}>
@@ -42,6 +46,41 @@ export function DebugPanel({ targetId }: Props) {
       <div style={{ fontSize: 12, opacity: 0.9 }}>
         {currentTime.toFixed(1)} / {duration.toFixed(1)}
       </div>
+      <label style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+        <span>Subtitle file</span>
+        <input
+          type="file"
+          accept=".srt,.ttml,.xml"
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+
+            if (!file) {
+              return;
+            }
+
+            try {
+              const text = await file.text();
+              const cues = parseSubtitleFile(file.name, text);
+
+              if (cues.length === 0) {
+                onSubtitleError('No usable subtitle cues found.');
+              } else {
+                onSubtitleLoaded(cues, file.name);
+              }
+            } catch {
+              onSubtitleError('Failed to read subtitle file.');
+            }
+
+            event.target.value = '';
+          }}
+        />
+      </label>
+      <div style={{ fontSize: 11, opacity: 0.75 }}>
+        {subtitleFileName || 'No subtitle loaded'}
+      </div>
+      {subtitleError ? (
+        <div style={{ fontSize: 11, color: '#ff8f8f' }}>{subtitleError}</div>
+      ) : null}
     </div>
   );
 }
