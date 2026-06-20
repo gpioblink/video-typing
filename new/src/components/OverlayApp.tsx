@@ -126,7 +126,7 @@ export function OverlayApp({
   }, [activeCue, typingProgress]);
 
   const activeProgress = useMemo<StoredFrameProgressData>(() => {
-    return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [] };
+    return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
   }, [activeFrame.id, typingProgress]);
 
   const isActiveFrameComplete = useMemo(() => {
@@ -169,7 +169,7 @@ export function OverlayApp({
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
     setTypingProgress((state) => {
-      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [] };
+      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
       const currentFinishedCharIds = currentFrameProgress.finishedCharIds;
 
       if (
@@ -182,7 +182,29 @@ export function OverlayApp({
       const nextFrameProgress = {
         ...currentFrameProgress,
         finishedCharIds,
+        updatedAt: finishedCharIds.length > 0 ? Date.now() : currentFrameProgress.updatedAt,
       };
+      const next = {
+        ...state,
+        [activeFrame.id]: nextFrameProgress,
+      };
+      void saveStoredTypingProgress(pageUrl, activeFrame.id, nextFrameProgress);
+      return next;
+    });
+  }, [activeFrame.id, pageUrl]);
+
+  const handleFrameInteracted = useCallback(() => {
+    setTypingProgress((state) => {
+      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
+      const nextFrameProgress = {
+        ...currentFrameProgress,
+        updatedAt: Date.now(),
+      };
+
+      if (currentFrameProgress.updatedAt === nextFrameProgress.updatedAt) {
+        return state;
+      }
+
       const next = {
         ...state,
         [activeFrame.id]: nextFrameProgress,
@@ -194,7 +216,7 @@ export function OverlayApp({
 
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
-      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [] };
+      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
 
       if (areTagsEqual(currentFrameProgress.tags, tags)) {
         return state;
@@ -257,6 +279,7 @@ export function OverlayApp({
             sendCompleted={() => {}}
             requestExplanation={handleRequestExplanation}
             sendMistake={() => {}}
+            onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}
           />

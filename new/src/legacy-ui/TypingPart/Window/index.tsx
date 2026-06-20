@@ -17,6 +17,7 @@ interface Props {
   sendCompleted: () => void;
   requestExplanation: (query: string) => void;
   sendMistake: (reason: TagContent) => void;
+  onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
 }
@@ -89,6 +90,7 @@ export function Window({
   sendCompleted,
   requestExplanation,
   sendMistake,
+  onFrameInteracted,
   onFinishedCharIdsChange,
   onTagsChange,
 }: Props) {
@@ -155,6 +157,8 @@ export function Window({
         if (inputIndex === -1) {
           return;
         }
+
+        onFrameInteracted();
 
         nextChars[inputIndex] = {
           ...nextChars[inputIndex],

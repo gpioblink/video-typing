@@ -65,6 +65,7 @@ export interface StoredSubtitleData {
 export interface StoredFrameProgressData {
   finishedCharIds: ID[];
   tags: Tag[];
+  updatedAt?: number;
 }
 
 export interface StoredTypingProgressData {

@@ -133,6 +133,7 @@ function normalizeFrameProgress(frameProgress: unknown): StoredFrameProgressData
     return {
       finishedCharIds: normalizeIdArray(frameProgress),
       tags: [],
+      updatedAt: undefined,
     };
   }
 
@@ -140,17 +141,20 @@ function normalizeFrameProgress(frameProgress: unknown): StoredFrameProgressData
     return {
       finishedCharIds: [],
       tags: [],
+      updatedAt: undefined,
     };
   }
 
   const candidate = frameProgress as {
     finishedCharIds?: unknown;
     tags?: unknown;
+    updatedAt?: unknown;
   };
 
   return {
     finishedCharIds: normalizeIdArray(candidate.finishedCharIds),
     tags: normalizeTags(candidate.tags),
+    updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : undefined,
   };
 }
 

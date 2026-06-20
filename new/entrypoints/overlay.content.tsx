@@ -10,7 +10,7 @@ import {
   saveStoredPlaybackPosition,
   saveStoredSubtitle,
 } from '../src/lib/storage';
-import { parseSubtitleFile } from '../src/lib/subtitles';
+import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import type { StoredSubtitleData } from '../src/types';
 
@@ -66,7 +66,10 @@ export default defineContentScript({
 
     const targetId = `video-typing-${Date.now()}`;
     video.setAttribute(VIDEO_ATTR, targetId);
-    await restorePlaybackPosition(video, storedPlaybackPosition?.currentTime);
+    await restorePlaybackPosition(
+      video,
+      getResumePlaybackPosition(subtitleFile.cues, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
+    );
 
     const ui = await createShadowRootUi(ctx, {
       name: 'video-typing-overlay',
@@ -153,6 +156,35 @@ async function restorePlaybackPosition(video: HTMLVideoElement, currentTime?: nu
 
     video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
   });
+}
+
+function getResumePlaybackPosition(
+  cues: StoredSubtitleData['cues'],
+  typingProgress: Awaited<ReturnType<typeof loadStoredTypingProgress>>,
+) {
+  let latestCueByUpdate: StoredSubtitleData['cues'][number] | null = null;
+  let latestUpdatedAt = Number.NEGATIVE_INFINITY;
+  let latestCueByOrder: StoredSubtitleData['cues'][number] | null = null;
+
+  for (const cue of cues) {
+    const frameId = subtitleCueToCaptionFrame(cue).id;
+    const progress = typingProgress[frameId];
+
+    if (!progress) {
+      continue;
+    }
+
+    if (progress.finishedCharIds.length > 0 || progress.tags.length > 0 || typeof progress.updatedAt === 'number') {
+      latestCueByOrder = cue;
+    }
+
+    if (typeof progress.updatedAt === 'number' && progress.updatedAt >= latestUpdatedAt) {
+      latestUpdatedAt = progress.updatedAt;
+      latestCueByUpdate = cue;
+    }
+  }
+
+  return latestCueByUpdate?.start ?? latestCueByOrder?.start;
 }
 
 function selectSubtitleFile(): Promise<File | null> {
