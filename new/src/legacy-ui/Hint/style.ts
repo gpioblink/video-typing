@@ -9,32 +9,6 @@ export const Layout = styled.div`
   width: 320px;
   max-height: 360px;
 
-  .status {
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.12);
-  }
-
-  .statusRow + .statusRow {
-    margin-top: 8px;
-  }
-
-  .statusLabel {
-    display: block;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: #9dbeb7;
-  }
-
-  .statusValue {
-    display: block;
-    margin-top: 2px;
-    font-size: 16px;
-    font-weight: 700;
-    word-break: break-word;
-  }
-
   .item {
     padding: 14px 16px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);

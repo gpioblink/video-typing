@@ -1,9 +1,12 @@
 import type {
+  ID,
   PanelKind,
   PanelPosition,
+  StoredFrameProgressData,
   StoredPanelPositions,
   StoredPlaybackPositionData,
   StoredSubtitleData,
+  Tag,
   StoredTypingProgressData,
 } from '../types';
 
@@ -50,23 +53,24 @@ export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleDa
 
 export async function loadStoredTypingProgress(url: string) {
   const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
-  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, StoredTypingProgressData>;
-  return progress[url] || {};
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
+  return normalizeTypingProgress(progress[url]);
 }
 
 export async function saveStoredTypingProgress(
   url: string,
   frameId: string,
-  finishedCharIds: string[],
+  frameProgress: StoredFrameProgressData,
 ) {
   const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
-  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, StoredTypingProgressData>;
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
+  const currentUrlProgress = normalizeTypingProgress(progress[url]);
   await chrome.storage.local.set({
     [PROGRESS_STORAGE_KEY]: {
       ...progress,
       [url]: {
-        ...(progress[url] || {}),
-        [frameId]: finishedCharIds,
+        ...currentUrlProgress,
+        [frameId]: normalizeFrameProgress(frameProgress),
       },
     },
   });
@@ -86,5 +90,88 @@ export async function saveStoredPlaybackPosition(url: string, currentTime: numbe
       ...positions,
       [url]: { currentTime },
     },
+  });
+}
+
+function normalizeTypingProgress(progress: Record<string, unknown> | undefined): StoredTypingProgressData {
+  if (!progress) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(progress).map(([frameId, frameProgress]) => [
+      frameId,
+      normalizeFrameProgress(frameProgress),
+    ]),
+  );
+}
+
+function normalizeFrameProgress(frameProgress: unknown): StoredFrameProgressData {
+  if (Array.isArray(frameProgress)) {
+    return {
+      finishedCharIds: normalizeIdArray(frameProgress),
+      tags: [],
+    };
+  }
+
+  if (!frameProgress || typeof frameProgress !== 'object') {
+    return {
+      finishedCharIds: [],
+      tags: [],
+    };
+  }
+
+  const candidate = frameProgress as {
+    finishedCharIds?: unknown;
+    tags?: unknown;
+  };
+
+  return {
+    finishedCharIds: normalizeIdArray(candidate.finishedCharIds),
+    tags: normalizeTags(candidate.tags),
+  };
+}
+
+function normalizeIdArray(value: unknown): ID[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is ID => typeof item === 'string');
+}
+
+function normalizeTags(value: unknown): Tag[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const candidate = item as {
+      id?: unknown;
+      pastedCharIds?: unknown;
+      content?: unknown;
+    };
+
+    if (
+      typeof candidate.id !== 'string' ||
+      !Array.isArray(candidate.pastedCharIds) ||
+      !candidate.pastedCharIds.every((charId) => typeof charId === 'string') ||
+      (candidate.content !== 'unaudible' &&
+        candidate.content !== 'ignorance' &&
+        candidate.content !== 'spelling' &&
+        candidate.content !== 'others')
+    ) {
+      return [];
+    }
+
+    return [{
+      id: candidate.id,
+      pastedCharIds: candidate.pastedCharIds,
+      content: candidate.content,
+    }];
   });
 }

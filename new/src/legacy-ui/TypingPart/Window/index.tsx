@@ -18,6 +18,7 @@ interface Props {
   requestExplanation: (query: string) => void;
   sendMistake: (reason: TagContent) => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
+  onTagsChange: (tags: Tag[]) => void;
 }
 
 function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
@@ -89,6 +90,7 @@ export function Window({
   requestExplanation,
   sendMistake,
   onFinishedCharIdsChange,
+  onTagsChange,
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
@@ -121,6 +123,10 @@ export function Window({
   useEffect(() => {
     onFinishedCharIdsChange(finishedCharIds);
   }, [finishedCharIds, onFinishedCharIdsChange]);
+
+  useEffect(() => {
+    onTagsChange(game.tags);
+  }, [game.tags, onTagsChange]);
 
   const splitCharsByNewLine = useMemo(() => {
     const rows: GameChar[][] = [[]];

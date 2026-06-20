@@ -46,8 +46,13 @@ export interface StoredSubtitleData {
   cues: SubtitleCue[];
 }
 
+export interface StoredFrameProgressData {
+  finishedCharIds: ID[];
+  tags: Tag[];
+}
+
 export interface StoredTypingProgressData {
-  [frameId: string]: ID[];
+  [frameId: string]: StoredFrameProgressData;
 }
 
 export interface StoredPlaybackPositionData {

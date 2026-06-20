@@ -14,7 +14,13 @@ import {
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
-import type { DictionaryWord, StoredTypingProgressData, SubtitleCue, TagContent } from '../types';
+import type {
+  DictionaryWord,
+  StoredFrameProgressData,
+  StoredTypingProgressData,
+  SubtitleCue,
+  Tag,
+} from '../types';
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -40,8 +46,6 @@ export function OverlayApp({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>(mockWords);
-  const [latestMistakeReason, setLatestMistakeReason] = useState<TagContent | null>(null);
-  const [latestMistakeQuery, setLatestMistakeQuery] = useState('');
   const currentTimeRef = useRef(0);
 
   const cache = useMemo(() => {
@@ -86,19 +90,26 @@ export function OverlayApp({
 
   const activeFrame = useMemo(() => {
     if (activeCue) {
-      return subtitleCueToCaptionFrame(activeCue);
+      const frame = subtitleCueToCaptionFrame(activeCue);
+      const storedProgress = typingProgress[frame.id];
+
+      return {
+        ...frame,
+        tags: storedProgress?.tags || [],
+      };
     }
 
     return emptyCaptionFrame();
-  }, [activeCue]);
+  }, [activeCue, typingProgress]);
 
-  const activeFinishedCharIds = useMemo(() => {
-    return typingProgress[activeFrame.id] || [];
+  const activeProgress = useMemo<StoredFrameProgressData>(() => {
+    return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [] };
   }, [activeFrame.id, typingProgress]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
     setTypingProgress((state) => {
-      const currentFinishedCharIds = state[activeFrame.id] || [];
+      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [] };
+      const currentFinishedCharIds = currentFrameProgress.finishedCharIds;
 
       if (
         currentFinishedCharIds.length === finishedCharIds.length &&
@@ -107,17 +118,41 @@ export function OverlayApp({
         return state;
       }
 
+      const nextFrameProgress = {
+        ...currentFrameProgress,
+        finishedCharIds,
+      };
       const next = {
         ...state,
-        [activeFrame.id]: finishedCharIds,
+        [activeFrame.id]: nextFrameProgress,
       };
-      void saveStoredTypingProgress(pageUrl, activeFrame.id, finishedCharIds);
+      void saveStoredTypingProgress(pageUrl, activeFrame.id, nextFrameProgress);
+      return next;
+    });
+  }, [activeFrame.id, pageUrl]);
+
+  const handleTagsChange = useCallback((tags: Tag[]) => {
+    setTypingProgress((state) => {
+      const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [] };
+
+      if (areTagsEqual(currentFrameProgress.tags, tags)) {
+        return state;
+      }
+
+      const nextFrameProgress = {
+        ...currentFrameProgress,
+        tags,
+      };
+      const next = {
+        ...state,
+        [activeFrame.id]: nextFrameProgress,
+      };
+      void saveStoredTypingProgress(pageUrl, activeFrame.id, nextFrameProgress);
       return next;
     });
   }, [activeFrame.id, pageUrl]);
 
   const handleRequestExplanation = useCallback((query: string) => {
-    setLatestMistakeQuery(query);
     setHintWords((state) => {
       const nextWord = {
         title: query,
@@ -128,29 +163,22 @@ export function OverlayApp({
     });
   }, []);
 
-  const handleMistake = useCallback((reason: TagContent) => {
-    setLatestMistakeReason(reason);
-  }, []);
-
   return (
     <CacheProvider value={cache}>
       <div style={overlayStyle}>
         <DraggablePanel kind="typing" title="Typing" defaultPosition={{ x: 24, y: 220 }}>
           <Window
             frame={activeFrame}
-            initialFinishedCharIds={activeFinishedCharIds}
+            initialFinishedCharIds={activeProgress.finishedCharIds}
             sendCompleted={() => {}}
             requestExplanation={handleRequestExplanation}
-            sendMistake={handleMistake}
+            sendMistake={() => {}}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
+            onTagsChange={handleTagsChange}
           />
         </DraggablePanel>
         <DraggablePanel kind="hint" title="Hint" defaultPosition={{ x: 700, y: 120 }}>
-          <Hint
-            latestMistakeReason={latestMistakeReason}
-            latestQuery={latestMistakeQuery}
-            words={hintWords}
-          />
+          <Hint words={hintWords} />
         </DraggablePanel>
         <DraggablePanel kind="debug" title="Debug" defaultPosition={{ x: 24, y: 24 }}>
           <DebugPanel
@@ -189,3 +217,20 @@ const overlayStyle: React.CSSProperties = {
   zIndex: 2147483646,
   pointerEvents: 'none',
 };
+
+function areTagsEqual(left: Tag[], right: Tag[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((leftTag, index) => {
+    const rightTag = right[index];
+
+    return (
+      leftTag.id === rightTag.id &&
+      leftTag.content === rightTag.content &&
+      leftTag.pastedCharIds.length === rightTag.pastedCharIds.length &&
+      leftTag.pastedCharIds.every((charId, charIndex) => charId === rightTag.pastedCharIds[charIndex])
+    );
+  });
+}
