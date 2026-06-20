@@ -6,19 +6,26 @@ import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
-import { mockFrame, mockWords } from '../data/mockData';
+import { mockWords } from '../data/mockData';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
 import type { SubtitleCue } from '../types';
 
 interface Props {
+  initialSubtitleCues: SubtitleCue[];
+  initialSubtitleFileName: string;
   targetId: string;
   shadowRoot: ShadowRoot;
 }
 
-export function OverlayApp({ shadowRoot, targetId }: Props) {
-  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
-  const [subtitleFileName, setSubtitleFileName] = useState('');
+export function OverlayApp({
+  initialSubtitleCues,
+  initialSubtitleFileName,
+  shadowRoot,
+  targetId,
+}: Props) {
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>(initialSubtitleCues);
+  const [subtitleFileName, setSubtitleFileName] = useState(initialSubtitleFileName);
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -51,8 +58,8 @@ export function OverlayApp({ shadowRoot, targetId }: Props) {
       return subtitleCueToCaptionFrame(activeCue);
     }
 
-    return subtitleFileName ? emptyCaptionFrame() : mockFrame;
-  }, [activeCue, subtitleFileName]);
+    return emptyCaptionFrame();
+  }, [activeCue]);
 
   return (
     <CacheProvider value={cache}>
