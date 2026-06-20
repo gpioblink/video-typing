@@ -7,6 +7,7 @@ import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockWords } from '../data/mockData';
+import { searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
   saveStoredPlaybackPosition,
   saveStoredSubtitle,
@@ -198,13 +199,31 @@ export function OverlayApp({
   }, [activeFrame.id, pageUrl]);
 
   const handleRequestExplanation = useCallback((query: string) => {
-    setHintWords((state) => {
-      const nextWord = {
-        title: query,
-        content: 'Matched subtitle text. Dictionary lookup is not connected in the overlay yet.',
-      };
-      const filtered = state.filter((word) => word.title !== query);
-      return [nextWord, ...filtered].slice(0, 10);
+    void searchExtensionDictionary(query).then((entries) => {
+      const nextWords = entries.length > 0
+        ? entries.map((entry) => ({
+          title: entry.headword,
+          content: entry.body,
+        }))
+        : [{
+          title: query,
+          content: 'Dictionary entry was not found.',
+        }];
+
+      setHintWords((state) => {
+        const existingKeys = new Set(nextWords.map((word) => `${word.title}\u0000${word.content}`));
+        const filtered = state.filter((word) => !existingKeys.has(`${word.title}\u0000${word.content}`));
+        return [...nextWords, ...filtered].slice(0, 10);
+      });
+    }).catch(() => {
+      setHintWords((state) => {
+        const nextWord = {
+          title: query,
+          content: 'Dictionary search failed.',
+        };
+        const filtered = state.filter((word) => word.title !== nextWord.title || word.content !== nextWord.content);
+        return [nextWord, ...filtered].slice(0, 10);
+      });
     });
   }, []);
 

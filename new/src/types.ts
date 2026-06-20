@@ -24,6 +24,15 @@ export interface DictionaryWord {
   content: string;
 }
 
+export interface DictionaryEntry {
+  key: string;
+  headword: string;
+  normalizedHeadword: string;
+  body: string;
+  sourceName: string;
+  importedAt: number;
+}
+
 export type PanelKind = 'typing' | 'hint' | 'debug' | 'subtitle';
 
 export interface PanelPosition {

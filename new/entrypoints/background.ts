@@ -1,4 +1,5 @@
 import { defineBackground } from 'wxt/utils/define-background';
+import { searchDictionary } from '../src/lib/dictionary';
 
 export default defineBackground(() => {
   chrome.action.onClicked.addListener(async (tab: any) => {
@@ -10,5 +11,17 @@ export default defineBackground(() => {
       target: { tabId: tab.id },
       files: ['content-scripts/overlay.js'],
     });
+  });
+
+  chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: any) => {
+    if (message?.type !== 'videoTypingDictionarySearch') {
+      return false;
+    }
+
+    void searchDictionary(String(message.query || ''))
+      .then((entries) => sendResponse({ entries }))
+      .catch(() => sendResponse({ entries: [] }));
+
+    return true;
   });
 });

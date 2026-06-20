@@ -74,7 +74,7 @@ function createMistakeTag(
 
   return {
     content,
-    query: charsToString(frame.caption.slice(wordHeadIndex + 1)),
+    query: charsToString(frame.caption.slice(wordHeadIndex + 1, charIndex + 1)),
     tag: {
       id: crypto.randomUUID(),
       pastedCharIds: targetCharIds,
