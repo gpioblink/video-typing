@@ -15,12 +15,25 @@ interface Props {
   frame: CaptionFrame;
   initialFinishedCharIds: ID[];
   sendCompleted: () => void;
-  requestExplanation: (query: string) => void;
+  requestExplanation: (query: string, options?: { silentIfMissing?: boolean }) => void;
   sendMistake: (reason: TagContent) => void;
   onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
 }
+
+const AUTO_HINT_EXCLUDED_WORDS = new Set([
+  'a', 'an', 'the',
+  'i', 'me', 'my', 'mine', 'myself',
+  'you', 'your', 'yours', 'yourself', 'yourselves',
+  'he', 'him', 'his', 'himself',
+  'she', 'her', 'hers', 'herself',
+  'it', 'its', 'itself',
+  'we', 'us', 'our', 'ours', 'ourselves',
+  'they', 'them', 'their', 'theirs', 'themselves',
+  'this', 'that', 'these', 'those',
+  'who', 'whom', 'whose', 'what', 'which', 'when', 'where', 'why', 'how',
+]);
 
 function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
   const finishedCharIds = new Set(initialFinishedCharIds);
@@ -70,6 +83,16 @@ function getWordInfo(frame: CaptionFrame, currentCharId: ID) {
     targetCharIds: frame.caption.slice(wordStartIndex, wordEndIndex + 1).map((char) => char.id),
     query: charsToString(frame.caption.slice(wordStartIndex, wordEndIndex + 1)),
   };
+}
+
+function shouldRequestAutoHint(query: string) {
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized || normalized.length <= 2) {
+    return false;
+  }
+
+  return !AUTO_HINT_EXCLUDED_WORDS.has(normalized);
 }
 
 function createMistakeTag(
@@ -193,6 +216,7 @@ export function Window({
         let nextTags = state.tags;
 
         if (isCorrect) {
+          const wordInfo = getWordInfo(frame, nextChars[inputIndex].char.id);
           nextChars[inputIndex] = {
             ...nextChars[inputIndex],
             status: 'finished',
@@ -202,11 +226,23 @@ export function Window({
 
           if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
             const mistake = createMistakeTag(frame, nextKeyboardLog, nextChars[inputIndex].char.id);
+            const wordKey = wordInfo?.targetCharIds.join(',');
 
             if (mistake) {
               nextTags = [...state.tags, mistake.tag];
               requestExplanation(mistake.query);
               sendMistake(mistake.content);
+              if (wordKey) {
+                hintedWordKeysRef.current.add(wordKey);
+              }
+            } else if (
+              wordInfo &&
+              wordKey &&
+              shouldRequestAutoHint(wordInfo.query) &&
+              !hintedWordKeysRef.current.has(wordKey)
+            ) {
+              hintedWordKeysRef.current.add(wordKey);
+              requestExplanation(wordInfo.query, { silentIfMissing: true });
             }
           }
 

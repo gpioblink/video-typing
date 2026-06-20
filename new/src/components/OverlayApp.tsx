@@ -232,8 +232,12 @@ export function OverlayApp({
     });
   }, [activeFrame.id, pageUrl]);
 
-  const handleRequestExplanation = useCallback((query: string) => {
+  const handleRequestExplanation = useCallback((query: string, options?: { silentIfMissing?: boolean }) => {
     void searchExtensionDictionary(query).then((entries) => {
+      if (entries.length === 0 && options?.silentIfMissing) {
+        return;
+      }
+
       const nextWords = entries.length > 0
         ? entries.map((entry) => ({
           title: entry.headword,
@@ -250,6 +254,10 @@ export function OverlayApp({
         return [...nextWords, ...filtered].slice(0, 10);
       });
     }).catch(() => {
+      if (options?.silentIfMissing) {
+        return;
+      }
+
       setHintWords((state) => {
         const nextWord = {
           title: query,
