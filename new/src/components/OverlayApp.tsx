@@ -7,6 +7,7 @@ import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockFrame, mockWords } from '../data/mockData';
+import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
 import type { SubtitleCue } from '../types';
 
@@ -45,12 +46,20 @@ export function OverlayApp({ shadowRoot, targetId }: Props) {
     return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
   }, [currentTime, subtitleCues]);
 
+  const activeFrame = useMemo(() => {
+    if (activeCue) {
+      return subtitleCueToCaptionFrame(activeCue);
+    }
+
+    return subtitleFileName ? emptyCaptionFrame() : mockFrame;
+  }, [activeCue, subtitleFileName]);
+
   return (
     <CacheProvider value={cache}>
       <div style={overlayStyle}>
         <DraggablePanel kind="typing" title="Typing" defaultPosition={{ x: 24, y: 220 }}>
           <Window
-            frame={mockFrame}
+            frame={activeFrame}
             sendCompleted={() => {}}
             requestExplanation={() => {}}
             sendMistake={() => {}}

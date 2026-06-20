@@ -33,7 +33,7 @@ export interface PanelPosition {
 
 export type StoredPanelPositions = Record<string, Partial<Record<PanelKind, PanelPosition>>>;
 
-export type SubtitleFormat = 'srt' | 'ttml';
+export type SubtitleFormat = 'srt' | 'ttml' | 'vtt';
 
 export interface SubtitleCue {
   start: number;

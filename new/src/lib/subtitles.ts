@@ -1,20 +1,53 @@
-import type { SubtitleCue, SubtitleFormat } from '../types';
+import type { CaptionFrame, Char, SubtitleCue, SubtitleFormat } from '../types';
 
 export function parseSubtitleFile(fileName: string, text: string): SubtitleCue[] {
   const format = detectSubtitleFormat(fileName, text);
-  return format === 'srt' ? parseSrt(text) : parseTtml(text);
+
+  if (format === 'srt') {
+    return parseSrt(text);
+  }
+
+  if (format === 'vtt') {
+    return parseVtt(text);
+  }
+
+  return parseTtml(text);
+}
+
+export function subtitleCueToCaptionFrame(cue: SubtitleCue): CaptionFrame {
+  return {
+    id: `subtitle-${cue.start}-${cue.end}-${hashText(cue.text)}`,
+    caption: textToCaptionChars(cue.text),
+    tags: [],
+  };
+}
+
+export function emptyCaptionFrame(id = 'subtitle-empty'): CaptionFrame {
+  return {
+    id,
+    caption: [],
+    tags: [],
+  };
 }
 
 function detectSubtitleFormat(fileName: string, text: string): SubtitleFormat {
   const lowerFileName = fileName.toLowerCase();
   const trimmed = text.trimStart().toLowerCase();
 
-  if (lowerFileName.endsWith('.srt')) {
+  if (lowerFileName.endsWith('.vtt') || lowerFileName.endsWith('.vtt.txt')) {
+    return 'vtt';
+  }
+
+  if (lowerFileName.endsWith('.srt') || lowerFileName.endsWith('.srt.txt')) {
     return 'srt';
   }
 
   if (lowerFileName.endsWith('.ttml') || lowerFileName.endsWith('.xml')) {
     return 'ttml';
+  }
+
+  if (trimmed.startsWith('webvtt')) {
+    return 'vtt';
   }
 
   if (trimmed.startsWith('<?xml') || trimmed.includes('<tt')) {
@@ -40,6 +73,47 @@ function parseSrt(text: string): SubtitleCue[] {
     }
 
     const [startText, endText] = lines[timingIndex].split('-->').map((value) => value.trim());
+    const start = parseSubtitleTime(startText);
+    const end = parseSubtitleTime(endText);
+    const body = lines.slice(timingIndex + 1).join('\n').trim();
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !body) {
+      return [];
+    }
+
+    return [{ start, end, text: body }];
+  });
+}
+
+function parseVtt(text: string): SubtitleCue[] {
+  const blocks = text
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks.flatMap((block) => {
+    const lines = block.split('\n').map((line) => line.trimEnd());
+    const firstLine = lines[0]?.trim().toLowerCase() || '';
+
+    if (
+      firstLine.startsWith('webvtt') ||
+      firstLine.startsWith('note') ||
+      firstLine === 'style' ||
+      firstLine === 'region'
+    ) {
+      return [];
+    }
+
+    const timingIndex = lines.findIndex((line) => line.includes('-->'));
+
+    if (timingIndex === -1) {
+      return [];
+    }
+
+    const [startText, endTextWithSettings] = lines[timingIndex].split('-->').map((value) => value.trim());
+    const endText = endTextWithSettings.split(/\s+/)[0] || '';
     const start = parseSubtitleTime(startText);
     const end = parseSubtitleTime(endText);
     const body = lines.slice(timingIndex + 1).join('\n').trim();
@@ -123,4 +197,37 @@ function parseSubtitleTime(input: string) {
   }
 
   return Number(normalized);
+}
+
+function textToCaptionChars(text: string): Char[] {
+  const bracketOrAlphabet = /\[[^\]]*\]|\([^\)]*\)|[A-Za-z]/g;
+  const chars = Array.from(text);
+  const typeableIndexes = new Set<number>();
+  let match: RegExpExecArray | null;
+
+  while ((match = bracketOrAlphabet.exec(text)) !== null) {
+    if (/^[A-Za-z]$/.test(match[0])) {
+      typeableIndexes.add(countCodePoints(text.slice(0, match.index)));
+    }
+  }
+
+  return chars.map((char, index) => ({
+    id: String(index),
+    char,
+    isTypeable: typeableIndexes.has(index),
+  }));
+}
+
+function countCodePoints(text: string) {
+  return Array.from(text).length;
+}
+
+function hashText(text: string) {
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+
+  return hash.toString(36);
 }

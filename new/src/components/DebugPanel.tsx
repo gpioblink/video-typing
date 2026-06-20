@@ -50,7 +50,7 @@ export function DebugPanel({
         <span>Subtitle file</span>
         <input
           type="file"
-          accept=".srt,.ttml,.xml"
+          accept=".srt,.vtt,.ttml,.xml,.txt"
           onChange={async (event) => {
             const file = event.target.files?.[0];
 
