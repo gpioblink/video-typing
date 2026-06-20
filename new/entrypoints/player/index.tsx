@@ -270,10 +270,12 @@ function PlayerApp() {
     const replay = async () => {
       const shouldResumeMain = !mainVideo.paused;
       const wasMainMuted = mainVideo.muted;
+      const previousNativePlaybackRate = nativeVideo.playbackRate;
       mainVideo.muted = true;
       mainVideo.currentTime = Math.max(0, cue.start);
       nativeVideo.pause();
       nativeVideo.currentTime = Math.max(0, cue.start);
+      nativeVideo.playbackRate = mainVideo.playbackRate;
 
       try {
         await Promise.all([
@@ -283,6 +285,7 @@ function PlayerApp() {
         await waitForMediaTime(nativeVideo, cue.end);
       } finally {
         nativeVideo.pause();
+        nativeVideo.playbackRate = previousNativePlaybackRate;
         mainVideo.muted = wasMainMuted;
 
         if (!shouldResumeMain) {

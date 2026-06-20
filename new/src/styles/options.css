@@ -20,7 +20,7 @@ input {
 }
 
 .panel {
-  width: min(760px, 100%);
+  width: min(920px, 100%);
   border: 1px solid #d8d1c1;
   border-radius: 8px;
   background: #fffaf0;
@@ -39,6 +39,12 @@ input {
 h1 {
   margin: 0;
   font-size: 28px;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 0;
+  font-size: 20px;
   line-height: 1.2;
 }
 
@@ -73,6 +79,26 @@ p {
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+.dictionaryPanels {
+  display: grid;
+  gap: 18px;
+}
+
+.dictionaryPanel {
+  border: 1px solid #d8d1c1;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.54);
+  padding: 18px;
+}
+
+.dictionaryHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 16px;
 }
 
 .dropzone {
@@ -196,6 +222,7 @@ button:disabled {
   }
 
   .header,
+  .dictionaryHeader,
   .actions {
     flex-direction: column;
     align-items: stretch;

@@ -1,5 +1,5 @@
 import { defineBackground } from 'wxt/utils/define-background';
-import { searchDictionary } from '../src/lib/dictionary';
+import { searchChineseDictionary, searchDictionary } from '../src/lib/dictionary';
 
 export default defineBackground(() => {
   chrome.action.onClicked.addListener(async (tab: any) => {
@@ -14,14 +14,22 @@ export default defineBackground(() => {
   });
 
   chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: any) => {
-    if (message?.type !== 'videoTypingDictionarySearch') {
-      return false;
+    if (message?.type === 'videoTypingDictionarySearch') {
+      void searchDictionary(String(message.query || ''))
+        .then((entries) => sendResponse({ entries }))
+        .catch(() => sendResponse({ entries: [] }));
+
+      return true;
     }
 
-    void searchDictionary(String(message.query || ''))
-      .then((entries) => sendResponse({ entries }))
-      .catch(() => sendResponse({ entries: [] }));
+    if (message?.type === 'videoTypingChineseDictionarySearch') {
+      void searchChineseDictionary(String(message.query || ''), String(message.contextText || ''))
+        .then((entries) => sendResponse({ entries }))
+        .catch(() => sendResponse({ entries: [] }));
 
-    return true;
+      return true;
+    }
+
+    return false;
   });
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Style } from './style';
 import { Line } from '../Line';
-import type { CaptionFrame, Char, ID, Tag, TagContent } from '../../../types';
+import type { CaptionFrame, Char, ChineseTypingWord, ID, Tag, TagContent } from '../../../types';
 
 export type TypingStatus = 'wait' | 'available' | 'mistaken' | 'finished';
 
@@ -15,12 +15,17 @@ interface Props {
   frame: CaptionFrame;
   initialFinishedCharIds: ID[];
   sendCompleted: () => void;
-  requestExplanation: (query: string, options?: { silentIfMissing?: boolean }) => void;
+  requestExplanation: (query: string, options?: ExplanationRequestOptions) => void;
   sendMistake: (reason: TagContent) => void;
   onMistakeInput?: () => void;
   onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
+}
+
+interface ExplanationRequestOptions {
+  silentIfMissing?: boolean;
+  sourceText?: string;
 }
 
 const AUTO_HINT_EXCLUDED_WORDS = new Set([
@@ -35,6 +40,10 @@ const AUTO_HINT_EXCLUDED_WORDS = new Set([
   'this', 'that', 'these', 'those',
   'who', 'whom', 'whose', 'what', 'which', 'when', 'where', 'why', 'how',
 ]);
+
+const DEFAULT_COLUMNS_PER_LINE = 50;
+const CHAR_CELL_WIDTH = 12;
+const WINDOW_HORIZONTAL_PADDING = 24;
 
 function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
   const finishedCharIds = new Set(initialFinishedCharIds);
@@ -86,6 +95,39 @@ function getWordInfo(frame: CaptionFrame, currentCharId: ID) {
   };
 }
 
+function getChineseSourceTextForWordInfo(
+  frame: CaptionFrame,
+  wordInfo: { targetCharIds: ID[] },
+) {
+  const words = (frame as CaptionFrame & { words?: ChineseTypingWord[] }).words;
+
+  if (!words?.length) {
+    return undefined;
+  }
+
+  const targetCharIds = new Set(wordInfo.targetCharIds);
+
+  for (const word of words) {
+    const startIndex = frame.caption.findIndex((char) => char.id === word.startCharId);
+    const endIndex = frame.caption.findIndex((char) => char.id === word.endCharId);
+
+    if (startIndex === -1 || endIndex === -1) {
+      continue;
+    }
+
+    const wordCharIds = frame.caption
+      .slice(startIndex, endIndex + 1)
+      .filter((char) => char.isTypeable)
+      .map((char) => char.id);
+
+    if (wordCharIds.some((charId) => targetCharIds.has(charId))) {
+      return word.sourceText;
+    }
+  }
+
+  return undefined;
+}
+
 function shouldRequestAutoHint(query: string) {
   const normalized = query.trim().toLowerCase();
 
@@ -94,6 +136,27 @@ function shouldRequestAutoHint(query: string) {
   }
 
   return !AUTO_HINT_EXCLUDED_WORDS.has(normalized);
+}
+
+function splitGameCharsIntoRows(gameChars: GameChar[], columnsPerLine: number) {
+  const rows: GameChar[][] = [[]];
+
+  for (const char of gameChars) {
+    let currentRow = rows[rows.length - 1];
+
+    if (char.char.char !== '\n' && currentRow.length >= columnsPerLine) {
+      currentRow = [];
+      rows.push(currentRow);
+    }
+
+    currentRow.push(char);
+
+    if (char.char.char === '\n') {
+      rows.push([]);
+    }
+  }
+
+  return rows;
 }
 
 function createMistakeTag(
@@ -140,6 +203,7 @@ export function Window({
   const keyboardLogRef = useRef(keyboardLog);
   const keyboardRef = useRef<HTMLDivElement>(null);
   const hintedWordKeysRef = useRef<Set<string>>(new Set());
+  const [columnsPerLine, setColumnsPerLine] = useState(DEFAULT_COLUMNS_PER_LINE);
 
   useEffect(() => {
     const nextGame = initializeGame(frame, initialFinishedCharIds);
@@ -172,16 +236,31 @@ export function Window({
     onTagsChange(game.tags);
   }, [game.tags, onTagsChange]);
 
-  const splitCharsByNewLine = useMemo(() => {
-    const rows: GameChar[][] = [[]];
-    game.gameChars.forEach((char) => {
-      rows[rows.length - 1].push(char);
-      if (char.char.char === '\n') {
-        rows.push([]);
-      }
-    });
-    return rows;
-  }, [game.gameChars]);
+  useEffect(() => {
+    const element = keyboardRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const updateColumns = () => {
+      const contentWidth = Math.max(CHAR_CELL_WIDTH, element.clientWidth - WINDOW_HORIZONTAL_PADDING);
+      setColumnsPerLine(Math.max(1, Math.floor(contentWidth / CHAR_CELL_WIDTH)));
+    };
+
+    updateColumns();
+
+    const observer = new ResizeObserver(updateColumns);
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const splitCharsByRows = useMemo(() => {
+    return splitGameCharsIntoRows(game.gameChars, columnsPerLine);
+  }, [columnsPerLine, game.gameChars]);
 
   return (
     <Style
@@ -229,10 +308,11 @@ export function Window({
           if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
             const mistake = createMistakeTag(frame, nextKeyboardLog, nextChars[inputIndex].char.id);
             const wordKey = wordInfo?.targetCharIds.join(',');
+            const sourceText = wordInfo ? getChineseSourceTextForWordInfo(frame, wordInfo) : undefined;
 
             if (mistake) {
               nextTags = [...state.tags, mistake.tag];
-              requestExplanation(mistake.query);
+              requestExplanation(mistake.query, { sourceText });
               sendMistake(mistake.content);
               if (wordKey) {
                 hintedWordKeysRef.current.add(wordKey);
@@ -244,7 +324,7 @@ export function Window({
               !hintedWordKeysRef.current.has(wordKey)
             ) {
               hintedWordKeysRef.current.add(wordKey);
-              requestExplanation(wordInfo.query, { silentIfMissing: true });
+              requestExplanation(wordInfo.query, { silentIfMissing: true, sourceText });
             }
           }
 
@@ -268,7 +348,9 @@ export function Window({
 
             if (missCount >= 3 && !hintedWordKeysRef.current.has(wordKey)) {
               hintedWordKeysRef.current.add(wordKey);
-              requestExplanation(wordInfo.query);
+              requestExplanation(wordInfo.query, {
+                sourceText: getChineseSourceTextForWordInfo(frame, wordInfo),
+              });
             }
           }
 
@@ -287,7 +369,7 @@ export function Window({
         setGame(nextGame);
       }}
     >
-      {splitCharsByNewLine.map((chars, index) => (
+      {splitCharsByRows.map((chars, index) => (
         <Line key={chars[0]?.char.id || `line-${index}`} chars={chars} tags={game.tags} />
       ))}
     </Style>

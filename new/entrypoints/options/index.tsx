@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import {
   countDictionaryEntries,
   type DictionaryImportProgress,
+  type DictionaryKind,
   importDictionaryTsv,
   parseDictionaryTsv,
 } from '../../src/lib/dictionary';
@@ -14,7 +15,13 @@ interface ImportPreview {
   skipped: number;
 }
 
-function OptionsApp() {
+interface DictionaryImportPanelProps {
+  kind: DictionaryKind;
+  title: string;
+  description: string;
+}
+
+function DictionaryImportPanel({ kind, title, description }: DictionaryImportPanelProps) {
   const fileTextRef = useRef('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -24,8 +31,8 @@ function OptionsApp() {
   const [importProgress, setImportProgress] = useState<DictionaryImportProgress | null>(null);
 
   useEffect(() => {
-    void countDictionaryEntries().then(setTotal);
-  }, []);
+    void countDictionaryEntries(kind).then(setTotal);
+  }, [kind]);
 
   useEffect(() => {
     if (!file) {
@@ -41,7 +48,7 @@ function OptionsApp() {
       }
 
       fileTextRef.current = text;
-      const parsed = parseDictionaryTsv(text);
+      const parsed = parseDictionaryTsv(text, kind);
       setPreview({
         fileName: file.name,
         entries: parsed.entries.length,
@@ -58,7 +65,7 @@ function OptionsApp() {
     return () => {
       cancelled = true;
     };
-  }, [file]);
+  }, [file, kind]);
 
   const handleImport = async () => {
     if (!file) {
@@ -82,6 +89,7 @@ function OptionsApp() {
         setImportProgress,
         preview?.entries,
         preview?.skipped,
+        kind,
       );
       setTotal(result.total);
       setStatus(`Imported ${result.imported} entries. Skipped ${result.skipped} lines.`);
@@ -92,6 +100,75 @@ function OptionsApp() {
     }
   };
 
+  return (
+    <section className="dictionaryPanel">
+      <header className="dictionaryHeader">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <div className="total">
+          <span>Total entries</span>
+          <strong>{total.toLocaleString()}</strong>
+        </div>
+      </header>
+
+      <label className="dropzone">
+        <input
+          type="file"
+          accept=".tsv,.txt,text/tab-separated-values,text/plain"
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
+        />
+        <span className="dropTitle">{file?.name || 'Choose TSV file'}</span>
+        <span className="dropMeta">headword + tab + body</span>
+      </label>
+
+      {preview && (
+        <div className="stats">
+          <div>
+            <span>File</span>
+            <strong>{preview.fileName}</strong>
+          </div>
+          <div>
+            <span>Valid rows</span>
+            <strong>{preview.entries.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Skipped rows</span>
+            <strong>{preview.skipped.toLocaleString()}</strong>
+          </div>
+        </div>
+      )}
+
+      <div className="actions">
+        <button type="button" disabled={!file || isImporting} onClick={handleImport}>
+          Import TSV
+        </button>
+        {status && <p className="status">{status}</p>}
+      </div>
+
+      {importProgress && (
+        <div className="progressPanel">
+          <div className="progressLabel">
+            <span>Import progress</span>
+            <strong>{Math.round(importProgress.percent)}%</strong>
+          </div>
+          <div className="progressBar" aria-hidden="true">
+            <div className="progressFill" style={{ width: `${importProgress.percent}%` }} />
+          </div>
+          <div className="progressMeta">
+            <span>
+              {importProgress.processed.toLocaleString()} / {importProgress.totalEntries.toLocaleString()} processed
+            </span>
+            <span>{importProgress.imported.toLocaleString()} imported</span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OptionsApp() {
   const openLocalPlayer = (hash = '') => {
     const url = chrome.runtime.getURL(`player.html${hash}`);
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -105,10 +182,6 @@ function OptionsApp() {
             <h1>Dictionary settings</h1>
             <p>Import TSV entries for typing hints.</p>
           </div>
-          <div className="total">
-            <span>Total entries</span>
-            <strong>{total.toLocaleString()}</strong>
-          </div>
         </header>
 
         <div className="playerLinks">
@@ -120,57 +193,18 @@ function OptionsApp() {
           </button>
         </div>
 
-        <label className="dropzone">
-          <input
-            type="file"
-            accept=".tsv,.txt,text/tab-separated-values,text/plain"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
+        <div className="dictionaryPanels">
+          <DictionaryImportPanel
+            kind="english"
+            title="English dictionary"
+            description="Used for regular SRT/VTT typing hints."
           />
-          <span className="dropTitle">{file?.name || 'Choose TSV file'}</span>
-          <span className="dropMeta">headword + tab + body</span>
-        </label>
-
-        {preview && (
-          <div className="stats">
-            <div>
-              <span>File</span>
-              <strong>{preview.fileName}</strong>
-            </div>
-            <div>
-              <span>Valid rows</span>
-              <strong>{preview.entries.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Skipped rows</span>
-              <strong>{preview.skipped.toLocaleString()}</strong>
-            </div>
-          </div>
-        )}
-
-        <div className="actions">
-          <button type="button" disabled={!file || isImporting} onClick={handleImport}>
-            Import TSV
-          </button>
-          {status && <p className="status">{status}</p>}
+          <DictionaryImportPanel
+            kind="chinese"
+            title="Chinese dictionary"
+            description="Used only when Chinese typing JSON is loaded."
+          />
         </div>
-
-        {importProgress && (
-          <div className="progressPanel">
-            <div className="progressLabel">
-              <span>Import progress</span>
-              <strong>{Math.round(importProgress.percent)}%</strong>
-            </div>
-            <div className="progressBar" aria-hidden="true">
-              <div className="progressFill" style={{ width: `${importProgress.percent}%` }} />
-            </div>
-            <div className="progressMeta">
-              <span>
-                {importProgress.processed.toLocaleString()} / {importProgress.totalEntries.toLocaleString()} processed
-              </span>
-              <span>{importProgress.imported.toLocaleString()} imported</span>
-            </div>
-          </div>
-        )}
       </section>
     </main>
   );

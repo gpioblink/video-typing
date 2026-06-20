@@ -13,6 +13,23 @@ export async function searchExtensionDictionary(query: string): Promise<Dictiona
   return response.entries.filter(isDictionaryEntry);
 }
 
+export async function searchExtensionChineseDictionary(
+  query: string,
+  contextText: string,
+): Promise<DictionaryEntry[]> {
+  const response = await chrome.runtime.sendMessage({
+    type: 'videoTypingChineseDictionarySearch',
+    query,
+    contextText,
+  });
+
+  if (!response || !Array.isArray(response.entries)) {
+    return [];
+  }
+
+  return response.entries.filter(isDictionaryEntry);
+}
+
 function isDictionaryEntry(value: unknown): value is DictionaryEntry {
   if (!value || typeof value !== 'object') {
     return false;

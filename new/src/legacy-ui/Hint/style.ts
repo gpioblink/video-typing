@@ -22,5 +22,6 @@ export const Layout = styled.div`
     font-size: 12px;
     line-height: 1.5;
     padding-top: 8px;
+    white-space: pre-wrap;
   }
 `;

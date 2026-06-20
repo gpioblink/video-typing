@@ -1,10 +1,19 @@
 import type { DictionaryEntry } from '../types';
 
-const DB_NAME = 'videoTypingDictionary';
+export type DictionaryKind = 'english' | 'chinese';
+
 const DB_VERSION = 1;
 const STORE_NAME = 'entries';
 const NORMALIZED_HEADWORD_INDEX = 'normalizedHeadword';
 const MAX_SEARCH_RESULTS = 10;
+const IMPORT_PROGRESS_INTERVAL = 1000;
+const IMPORT_BATCH_SIZE = 5000;
+const MAX_CHINESE_LOOKUP_LENGTH = 39;
+
+const DB_NAMES: Record<DictionaryKind, string> = {
+  english: 'videoTypingDictionary',
+  chinese: 'videoTypingChineseDictionary',
+};
 
 export interface ParsedDictionaryTsv {
   entries: Array<Pick<DictionaryEntry, 'headword' | 'normalizedHeadword' | 'body'>>;
@@ -24,19 +33,18 @@ export interface DictionaryImportProgress {
   percent: number;
 }
 
-const IMPORT_PROGRESS_INTERVAL = 1000;
-const IMPORT_BATCH_SIZE = 5000;
+export function normalizeDictionaryHeadword(value: string, kind: DictionaryKind = 'english') {
+  const trimmed = value.trim();
 
-export function normalizeDictionaryHeadword(value: string) {
-  return value.trim().toLowerCase();
+  return kind === 'english' ? trimmed.toLowerCase() : trimmed;
 }
 
-export function parseDictionaryTsv(text: string): ParsedDictionaryTsv {
+export function parseDictionaryTsv(text: string, kind: DictionaryKind = 'english'): ParsedDictionaryTsv {
   const entries: ParsedDictionaryTsv['entries'] = [];
   let skipped = 0;
 
   for (const line of iterateDictionaryTsvLines(text)) {
-    const parsedLine = parseDictionaryTsvLine(line);
+    const parsedLine = parseDictionaryTsvLine(line, kind);
 
     if (!parsedLine) {
       skipped += 1;
@@ -55,11 +63,12 @@ export async function importDictionaryTsv(
   onProgress?: (progress: DictionaryImportProgress) => void,
   totalEntriesHint?: number,
   skippedHint?: number,
+  kind: DictionaryKind = 'english',
 ): Promise<DictionaryImportResult> {
-  const db = await openDictionaryDb();
+  const db = await openDictionaryDb(kind);
   const importedAt = Date.now();
-  const totalEntries = totalEntriesHint ?? countValidDictionaryTsvEntries(text);
-  const skipped = skippedHint ?? countSkippedDictionaryTsvEntries(text);
+  const totalEntries = totalEntriesHint ?? countValidDictionaryTsvEntries(text, kind);
+  const skipped = skippedHint ?? countSkippedDictionaryTsvEntries(text, kind);
   let imported = 0;
   let processed = 0;
   let batch: DictionaryEntry[] = [];
@@ -72,7 +81,7 @@ export async function importDictionaryTsv(
   });
 
   for (const line of iterateDictionaryTsvLines(text)) {
-    const parsedLine = parseDictionaryTsvLine(line);
+    const parsedLine = parseDictionaryTsvLine(line, kind);
 
     if (!parsedLine) {
       continue;
@@ -110,43 +119,84 @@ export async function importDictionaryTsv(
   return {
     imported,
     skipped,
-    total: await countDictionaryEntries(),
+    total: await countDictionaryEntries(kind),
   };
 }
 
-export async function countDictionaryEntries() {
-  const db = await openDictionaryDb();
+export async function countDictionaryEntries(kind: DictionaryKind = 'english') {
+  const db = await openDictionaryDb(kind);
 
   return runTransaction(db, 'readonly', async (store) => {
     return requestToPromise<number>(store.count());
   });
 }
 
-export async function searchDictionary(query: string): Promise<DictionaryEntry[]> {
-  const normalizedQuery = normalizeDictionaryHeadword(query);
+export async function searchDictionary(
+  query: string,
+  kind: DictionaryKind = 'english',
+): Promise<DictionaryEntry[]> {
+  const normalizedQuery = normalizeDictionaryHeadword(query, kind);
 
   if (!normalizedQuery) {
     return [];
   }
 
-  const exactMatches = await getEntriesByNormalizedHeadword(normalizedQuery);
+  const exactMatches = await getEntriesByNormalizedHeadword(normalizedQuery, kind);
 
   if (exactMatches.length > 0) {
     return exactMatches.slice(0, MAX_SEARCH_RESULTS);
   }
 
-  return getEntriesByHeadwordPrefix(normalizedQuery, MAX_SEARCH_RESULTS);
+  return getEntriesByHeadwordPrefix(normalizedQuery, MAX_SEARCH_RESULTS, kind);
+}
+
+export async function searchChineseDictionary(
+  query: string,
+  contextText = '',
+): Promise<DictionaryEntry[]> {
+  const normalizedQuery = normalizeDictionaryHeadword(query, 'chinese');
+
+  if (normalizedQuery) {
+    const exactMatches = await getEntriesByNormalizedHeadword(normalizedQuery, 'chinese');
+
+    if (exactMatches.length > 0) {
+      return exactMatches.slice(0, MAX_SEARCH_RESULTS);
+    }
+  }
+
+  const candidates = createChineseLookupCandidates(normalizedQuery, contextText);
+  const seenKeys = new Set<string>();
+  const results: DictionaryEntry[] = [];
+
+  for (const candidate of candidates) {
+    const entries = await getEntriesByNormalizedHeadword(candidate, 'chinese');
+
+    for (const entry of entries) {
+      if (seenKeys.has(entry.key)) {
+        continue;
+      }
+
+      seenKeys.add(entry.key);
+      results.push(entry);
+
+      if (results.length >= MAX_SEARCH_RESULTS) {
+        return results;
+      }
+    }
+  }
+
+  return results;
 }
 
 function createDictionaryEntryKey(normalizedHeadword: string, body: string) {
   return `${normalizedHeadword}\u0000${body}`;
 }
 
-function countValidDictionaryTsvEntries(text: string) {
+function countValidDictionaryTsvEntries(text: string, kind: DictionaryKind) {
   let count = 0;
 
   for (const line of iterateDictionaryTsvLines(text)) {
-    if (parseDictionaryTsvLine(line)) {
+    if (parseDictionaryTsvLine(line, kind)) {
       count += 1;
     }
   }
@@ -154,11 +204,11 @@ function countValidDictionaryTsvEntries(text: string) {
   return count;
 }
 
-function countSkippedDictionaryTsvEntries(text: string) {
+function countSkippedDictionaryTsvEntries(text: string, kind: DictionaryKind) {
   let skipped = 0;
 
   for (const line of iterateDictionaryTsvLines(text)) {
-    if (!parseDictionaryTsvLine(line)) {
+    if (!parseDictionaryTsvLine(line, kind)) {
       skipped += 1;
     }
   }
@@ -183,7 +233,7 @@ function createImportProgress(
   };
 }
 
-function parseDictionaryTsvLine(line: string) {
+function parseDictionaryTsvLine(line: string, kind: DictionaryKind) {
   if (!line.trim()) {
     return null;
   }
@@ -195,8 +245,9 @@ function parseDictionaryTsvLine(line: string) {
   }
 
   const headword = line.slice(0, tabIndex).trim();
-  const body = line.slice(tabIndex + 1).trim();
-  const normalizedHeadword = normalizeDictionaryHeadword(headword);
+  const rawBody = line.slice(tabIndex + 1).trim();
+  const body = kind === 'chinese' ? rawBody.replace(/\\n/g, '\n') : rawBody;
+  const normalizedHeadword = normalizeDictionaryHeadword(headword, kind);
 
   if (!headword || !body || !normalizedHeadword) {
     return null;
@@ -223,6 +274,66 @@ function* iterateDictionaryTsvLines(text: string) {
     yield normalized.slice(start, index);
     start = index + 1;
   }
+}
+
+function createChineseLookupCandidates(query: string, contextText: string) {
+  const cleanedContext = removeBracketedCaptionText(contextText).replace(/\s+/g, '');
+  const candidateTexts = query && cleanedContext.includes(query)
+    ? [query, cleanedContext]
+    : [cleanedContext, query];
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const text of candidateTexts) {
+    const normalizedText = normalizeDictionaryHeadword(text, 'chinese');
+
+    if (!normalizedText) {
+      continue;
+    }
+
+    const queryIndex = query ? normalizedText.indexOf(query) : -1;
+    const preferredStarts = queryIndex >= 0
+      ? [queryIndex, ...createNumberRange(0, normalizedText.length).filter((index) => index !== queryIndex)]
+      : createNumberRange(0, normalizedText.length);
+
+    for (const start of preferredStarts) {
+      const maxLength = Math.min(MAX_CHINESE_LOOKUP_LENGTH, normalizedText.length - start);
+
+      for (let length = maxLength; length >= 1; length -= 1) {
+        const candidate = normalizedText.slice(start, start + length);
+
+        if (!candidate || seen.has(candidate) || !hasChineseIdeograph(candidate)) {
+          continue;
+        }
+
+        seen.add(candidate);
+        candidates.push(candidate);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function hasChineseIdeograph(text: string) {
+  return /[\u3400-\u9fff]/u.test(text);
+}
+
+function removeBracketedCaptionText(text: string) {
+  return text.replace(
+    /\[[^\]\r\n]*\]|【[^】\r\n]*】|\([^\)\r\n]*\)|（[^）\r\n]*）/g,
+    '',
+  );
+}
+
+function createNumberRange(start: number, endExclusive: number) {
+  const values: number[] = [];
+
+  for (let value = start; value < endExclusive; value += 1) {
+    values.push(value);
+  }
+
+  return values;
 }
 
 async function importDictionaryBatch(db: IDBDatabase, batch: DictionaryEntry[]) {
@@ -256,9 +367,10 @@ async function importDictionaryBatch(db: IDBDatabase, batch: DictionaryEntry[]) 
 
   return imported;
 }
-function openDictionaryDb(): Promise<IDBDatabase> {
+
+function openDictionaryDb(kind: DictionaryKind): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(DB_NAMES[kind], DB_VERSION);
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -293,16 +405,20 @@ async function runTransaction<T>(
   }
 }
 
-function getEntriesByNormalizedHeadword(normalizedHeadword: string) {
-  return queryDictionaryIndex(IDBKeyRange.only(normalizedHeadword), MAX_SEARCH_RESULTS);
+function getEntriesByNormalizedHeadword(normalizedHeadword: string, kind: DictionaryKind) {
+  return queryDictionaryIndex(IDBKeyRange.only(normalizedHeadword), MAX_SEARCH_RESULTS, kind);
 }
 
-function getEntriesByHeadwordPrefix(prefix: string, limit: number) {
-  return queryDictionaryIndex(IDBKeyRange.bound(prefix, `${prefix}\uffff`, false, false), limit);
+function getEntriesByHeadwordPrefix(prefix: string, limit: number, kind: DictionaryKind) {
+  return queryDictionaryIndex(IDBKeyRange.bound(prefix, `${prefix}\uffff`, false, false), limit, kind);
 }
 
-function queryDictionaryIndex(range: IDBKeyRange, limit: number): Promise<DictionaryEntry[]> {
-  return openDictionaryDb().then((db) => (
+function queryDictionaryIndex(
+  range: IDBKeyRange,
+  limit: number,
+  kind: DictionaryKind,
+): Promise<DictionaryEntry[]> {
+  return openDictionaryDb(kind).then((db) => (
     runTransaction(db, 'readonly', async (store) => {
       const index = store.index(NORMALIZED_HEADWORD_INDEX);
       const results: DictionaryEntry[] = [];

@@ -32,7 +32,7 @@ export function Line({ chars, tags }: Props) {
   };
 
   return (
-    <Style>
+    <Style columnCount={Math.max(chars.length, 1)}>
       {chars.map((char) => <CharView key={char.char.id} char={char} />)}
       {tags.map((tag) => {
         const position = calcTagPosition(tag);

@@ -6,7 +6,7 @@ import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
-import { searchExtensionDictionary } from '../lib/dictionaryClient';
+import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
   saveStoredPlaybackPosition,
   saveStoredSubtitle,
@@ -25,6 +25,8 @@ import type {
 
 const LOOP_START_PADDING_SECONDS = 1;
 const LOOP_END_PADDING_SECONDS = 1;
+const SLOW_PLAYBACK_MISTAKE_THRESHOLD = 5;
+const SLOW_PLAYBACK_RATE = 0.5;
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -67,6 +69,12 @@ export function OverlayApp({
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
   const mistakeCountsRef = useRef<Record<string, number>>({});
+  const activeFrameIdRef = useRef('');
+  const controlledPlaybackRateRef = useRef<{
+    frameId: string;
+    baseRate: number;
+    loopIndex: number;
+  } | null>(null);
 
   const cache = useMemo(() => {
     return createCache({
@@ -74,6 +82,58 @@ export function OverlayApp({
       container: shadowRoot,
     });
   }, [shadowRoot]);
+
+  const restoreControlledPlaybackRate = useCallback((video = getVideoElement(targetId)) => {
+    const controlledPlaybackRate = controlledPlaybackRateRef.current;
+
+    if (!video || !controlledPlaybackRate) {
+      controlledPlaybackRateRef.current = null;
+      return;
+    }
+
+    video.playbackRate = controlledPlaybackRate.baseRate;
+    controlledPlaybackRateRef.current = null;
+  }, [targetId]);
+
+  const applyMistakeSensitivePlaybackRate = useCallback((
+    frameId: string,
+    mistakeCount: number,
+    options?: { advanceLoop?: boolean },
+  ) => {
+    const video = getVideoElement(targetId);
+
+    if (!video) {
+      return;
+    }
+
+    if (mistakeCount < SLOW_PLAYBACK_MISTAKE_THRESHOLD) {
+      if (controlledPlaybackRateRef.current?.frameId === frameId) {
+        restoreControlledPlaybackRate(video);
+      }
+      return;
+    }
+
+    if (controlledPlaybackRateRef.current?.frameId !== frameId) {
+      restoreControlledPlaybackRate(video);
+      controlledPlaybackRateRef.current = {
+        frameId,
+        baseRate: video.playbackRate || 1,
+        loopIndex: 0,
+      };
+    } else if (options?.advanceLoop) {
+      controlledPlaybackRateRef.current.loopIndex += 1;
+    }
+
+    const controlledPlaybackRate = controlledPlaybackRateRef.current;
+
+    if (!controlledPlaybackRate) {
+      return;
+    }
+
+    video.playbackRate = controlledPlaybackRate.loopIndex % 2 === 0
+      ? SLOW_PLAYBACK_RATE
+      : controlledPlaybackRate.baseRate;
+  }, [restoreControlledPlaybackRate, targetId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -87,6 +147,11 @@ export function OverlayApp({
       const loopRange = loopRangeRef.current;
 
       if (loopRange && video.currentTime >= loopRange.end) {
+        const frameId = activeFrameIdRef.current;
+        const mistakeCount = frameId ? mistakeCountsRef.current[frameId] || 0 : 0;
+        if (frameId) {
+          applyMistakeSensitivePlaybackRate(frameId, mistakeCount, { advanceLoop: true });
+        }
         seekVideo(targetId, loopRange.start);
         setCurrentTime(loopRange.start);
         setDuration(video.duration || 0);
@@ -100,7 +165,13 @@ export function OverlayApp({
     return () => {
       window.clearInterval(timer);
     };
-  }, [targetId]);
+  }, [applyMistakeSensitivePlaybackRate, targetId]);
+
+  useEffect(() => {
+    return () => {
+      restoreControlledPlaybackRate();
+    };
+  }, [restoreControlledPlaybackRate]);
 
   useEffect(() => {
     currentTimeRef.current = currentTime;
@@ -177,6 +248,10 @@ export function OverlayApp({
     return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
   }, [activeFrame.id, typingProgress]);
 
+  useEffect(() => {
+    activeFrameIdRef.current = activeFrame.id;
+  }, [activeFrame.id]);
+
   const isActiveFrameComplete = useMemo(() => {
     const typeableCharCount = activeFrame.caption.filter((char) => char.isTypeable).length;
 
@@ -198,6 +273,7 @@ export function OverlayApp({
   useEffect(() => {
     if (!activeCue || isActiveFrameComplete) {
       loopRangeRef.current = null;
+      restoreControlledPlaybackRate();
       return;
     }
 
@@ -208,7 +284,15 @@ export function OverlayApp({
       start: loopStart,
       end: loopEnd,
     };
-  }, [activeCue, isActiveFrameComplete, subtitleCues]);
+    applyMistakeSensitivePlaybackRate(activeFrame.id, mistakeCountsRef.current[activeFrame.id] || 0);
+  }, [
+    activeCue,
+    activeFrame.id,
+    applyMistakeSensitivePlaybackRate,
+    isActiveFrameComplete,
+    restoreControlledPlaybackRate,
+    subtitleCues,
+  ]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
     setTypingProgress((state) => {
@@ -267,8 +351,9 @@ export function OverlayApp({
       ...mistakeCountsRef.current,
       [activeFrame.id]: nextCount,
     };
+    applyMistakeSensitivePlaybackRate(activeFrame.id, nextCount);
     onFrameMistake?.(activeCue, nextCount);
-  }, [activeCue, activeFrame.id, onFrameMistake]);
+  }, [activeCue, activeFrame.id, applyMistakeSensitivePlaybackRate, onFrameMistake]);
 
   const handleFrameCompleted = useCallback(() => {
     if (!activeCue) {
@@ -299,8 +384,17 @@ export function OverlayApp({
     });
   }, [activeFrame.id, pageUrl]);
 
-  const handleRequestExplanation = useCallback((query: string, options?: { silentIfMissing?: boolean }) => {
-    void searchExtensionDictionary(query).then((entries) => {
+  const handleRequestExplanation = useCallback((
+    query: string,
+    options?: { silentIfMissing?: boolean; sourceText?: string },
+  ) => {
+    const isChineseTypingMode = Boolean(typingFrames?.length);
+    const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
+    const searchPromise = isChineseTypingMode
+      ? searchExtensionChineseDictionary(displayQuery, activeCue?.text || '')
+      : searchExtensionDictionary(query);
+
+    void searchPromise.then((entries) => {
       if (entries.length === 0 && options?.silentIfMissing) {
         return;
       }
@@ -311,7 +405,7 @@ export function OverlayApp({
           content: entry.body,
         }))
         : [{
-          title: query,
+          title: displayQuery,
           content: 'Dictionary entry was not found.',
         }];
 
@@ -327,14 +421,14 @@ export function OverlayApp({
 
       setHintWords((state) => {
         const nextWord = {
-          title: query,
+          title: displayQuery,
           content: 'Dictionary search failed.',
         };
         const filtered = state.filter((word) => word.title !== nextWord.title || word.content !== nextWord.content);
         return [nextWord, ...filtered].slice(0, 10);
       });
     });
-  }, []);
+  }, [activeCue?.text, typingFrames?.length]);
 
   return (
     <CacheProvider value={cache}>
