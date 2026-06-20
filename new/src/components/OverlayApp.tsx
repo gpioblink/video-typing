@@ -23,8 +23,8 @@ import type {
   Tag,
 } from '../types';
 
+const LOOP_START_PADDING_SECONDS = 1;
 const LOOP_END_PADDING_SECONDS = 1;
-const NEXT_CUE_GUARD_SECONDS = 0.1;
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -109,6 +109,8 @@ export function OverlayApp({
     return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
   }, [currentTime, subtitleCues]);
 
+  // Keep showing the cue currently being typed even while playback moves
+  // into the padded pre/post-roll area around that cue.
   const activeCue = loopCue || timelineCue;
 
   const activeFrame = useMemo(() => {
@@ -153,13 +155,8 @@ export function OverlayApp({
       return;
     }
 
-    const nextCue = subtitleCues.find((cue) => cue.start > activeCue.start);
-    const loopStart = activeCue.start;
-    const paddedEnd = activeCue.end + LOOP_END_PADDING_SECONDS;
-    const nextCueBoundary = nextCue
-      ? Math.max(activeCue.start, nextCue.start - NEXT_CUE_GUARD_SECONDS)
-      : Number.POSITIVE_INFINITY;
-    const loopEnd = Math.min(paddedEnd, nextCueBoundary);
+    const loopStart = Math.max(0, activeCue.start - LOOP_START_PADDING_SECONDS);
+    const loopEnd = activeCue.end + LOOP_END_PADDING_SECONDS;
 
     loopRangeRef.current = {
       start: loopStart,
