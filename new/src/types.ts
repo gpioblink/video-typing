@@ -40,3 +40,8 @@ export interface SubtitleCue {
   end: number;
   text: string;
 }
+
+export interface StoredSubtitleData {
+  fileName: string;
+  cues: SubtitleCue[];
+}

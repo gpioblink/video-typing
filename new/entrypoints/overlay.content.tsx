@@ -3,16 +3,17 @@ import ReactDOM from 'react-dom/client';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import { OverlayApp } from '../src/components/OverlayApp';
+import { loadStoredSubtitle, saveStoredSubtitle } from '../src/lib/storage';
 import { parseSubtitleFile } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
-import type { SubtitleCue } from '../src/types';
+import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
 const VIDEO_ATTR = 'data-video-typing-target-id';
 const SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt';
 
 interface LoadedSubtitleFile {
-  cues: SubtitleCue[];
+  cues: StoredSubtitleData['cues'];
   fileName: string;
 }
 
@@ -29,17 +30,23 @@ export default defineContentScript({
   cssInjectionMode: 'ui',
   async main(ctx: any) {
     const video = document.querySelector('video');
+    const pageUrl = window.location.href;
 
     if (!video) {
       showToast('No video tag found on this page.');
       return;
     }
 
-    const subtitleFile = await requestSubtitleFile();
+    const storedSubtitle = await loadStoredSubtitle(pageUrl);
+    const subtitleFile = storedSubtitle || await requestSubtitleFile();
 
     if (!subtitleFile) {
       showToast('Subtitle file is required. Overlay was not started.');
       return;
+    }
+
+    if (!storedSubtitle) {
+      await saveStoredSubtitle(pageUrl, subtitleFile);
     }
 
     window[OVERLAY_KEY]?.remove();
@@ -61,6 +68,7 @@ export default defineContentScript({
           <OverlayApp
             initialSubtitleCues={subtitleFile.cues}
             initialSubtitleFileName={subtitleFile.fileName}
+            pageUrl={pageUrl}
             shadowRoot={container.getRootNode() as ShadowRoot}
             targetId={targetId}
           />,

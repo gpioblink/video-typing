@@ -7,6 +7,7 @@ import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockWords } from '../data/mockData';
+import { saveStoredSubtitle } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
 import type { SubtitleCue } from '../types';
@@ -14,6 +15,7 @@ import type { SubtitleCue } from '../types';
 interface Props {
   initialSubtitleCues: SubtitleCue[];
   initialSubtitleFileName: string;
+  pageUrl: string;
   targetId: string;
   shadowRoot: ShadowRoot;
 }
@@ -21,6 +23,7 @@ interface Props {
 export function OverlayApp({
   initialSubtitleCues,
   initialSubtitleFileName,
+  pageUrl,
   shadowRoot,
   targetId,
 }: Props) {
@@ -83,6 +86,7 @@ export function OverlayApp({
             subtitleFileName={subtitleFileName}
             subtitleError={subtitleError}
             onSubtitleLoaded={(cues, fileName) => {
+              void saveStoredSubtitle(pageUrl, { cues, fileName });
               setSubtitleCues(cues);
               setSubtitleFileName(fileName);
               setSubtitleError('');
