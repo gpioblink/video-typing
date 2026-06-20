@@ -3,10 +3,12 @@ import type {
   PanelPosition,
   StoredPanelPositions,
   StoredSubtitleData,
+  StoredTypingProgressData,
 } from '../types';
 
 const STORAGE_KEY = 'videoTypingPrototypePanelPositions';
 const SUBTITLE_STORAGE_KEY = 'videoTypingPrototypeSubtitles';
+const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
 
 export async function loadPanelPosition(hostname: string, kind: PanelKind) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
@@ -40,6 +42,30 @@ export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleDa
     [SUBTITLE_STORAGE_KEY]: {
       ...subtitles,
       [url]: subtitle,
+    },
+  });
+}
+
+export async function loadStoredTypingProgress(url: string) {
+  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, StoredTypingProgressData>;
+  return progress[url] || {};
+}
+
+export async function saveStoredTypingProgress(
+  url: string,
+  frameId: string,
+  finishedCharIds: string[],
+) {
+  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, StoredTypingProgressData>;
+  await chrome.storage.local.set({
+    [PROGRESS_STORAGE_KEY]: {
+      ...progress,
+      [url]: {
+        ...(progress[url] || {}),
+        [frameId]: finishedCharIds,
+      },
     },
   });
 }

@@ -1,20 +1,21 @@
 import { CacheProvider } from '@emotion/react';
 import createCache from '@emotion/cache';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { DebugPanel } from './DebugPanel';
 import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockWords } from '../data/mockData';
-import { saveStoredSubtitle } from '../lib/storage';
+import { saveStoredSubtitle, saveStoredTypingProgress } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
-import type { SubtitleCue } from '../types';
+import type { StoredTypingProgressData, SubtitleCue } from '../types';
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
   initialSubtitleFileName: string;
+  initialTypingProgress: StoredTypingProgressData;
   pageUrl: string;
   targetId: string;
   shadowRoot: ShadowRoot;
@@ -23,12 +24,14 @@ interface Props {
 export function OverlayApp({
   initialSubtitleCues,
   initialSubtitleFileName,
+  initialTypingProgress,
   pageUrl,
   shadowRoot,
   targetId,
 }: Props) {
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>(initialSubtitleCues);
   const [subtitleFileName, setSubtitleFileName] = useState(initialSubtitleFileName);
+  const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -64,15 +67,41 @@ export function OverlayApp({
     return emptyCaptionFrame();
   }, [activeCue]);
 
+  const activeFinishedCharIds = useMemo(() => {
+    return typingProgress[activeFrame.id] || [];
+  }, [activeFrame.id, typingProgress]);
+
+  const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
+    setTypingProgress((state) => {
+      const currentFinishedCharIds = state[activeFrame.id] || [];
+
+      if (
+        currentFinishedCharIds.length === finishedCharIds.length &&
+        currentFinishedCharIds.every((charId, index) => charId === finishedCharIds[index])
+      ) {
+        return state;
+      }
+
+      const next = {
+        ...state,
+        [activeFrame.id]: finishedCharIds,
+      };
+      void saveStoredTypingProgress(pageUrl, activeFrame.id, finishedCharIds);
+      return next;
+    });
+  }, [activeFrame.id, pageUrl]);
+
   return (
     <CacheProvider value={cache}>
       <div style={overlayStyle}>
         <DraggablePanel kind="typing" title="Typing" defaultPosition={{ x: 24, y: 220 }}>
           <Window
             frame={activeFrame}
+            initialFinishedCharIds={activeFinishedCharIds}
             sendCompleted={() => {}}
             requestExplanation={() => {}}
             sendMistake={() => {}}
+            onFinishedCharIdsChange={handleFinishedCharIdsChange}
           />
         </DraggablePanel>
         <DraggablePanel kind="hint" title="Hint" defaultPosition={{ x: 700, y: 120 }}>

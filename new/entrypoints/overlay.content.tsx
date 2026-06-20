@@ -3,7 +3,11 @@ import ReactDOM from 'react-dom/client';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import { OverlayApp } from '../src/components/OverlayApp';
-import { loadStoredSubtitle, saveStoredSubtitle } from '../src/lib/storage';
+import {
+  loadStoredSubtitle,
+  loadStoredTypingProgress,
+  saveStoredSubtitle,
+} from '../src/lib/storage';
 import { parseSubtitleFile } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import type { StoredSubtitleData } from '../src/types';
@@ -38,6 +42,7 @@ export default defineContentScript({
     }
 
     const storedSubtitle = await loadStoredSubtitle(pageUrl);
+    const storedTypingProgress = await loadStoredTypingProgress(pageUrl);
     const subtitleFile = storedSubtitle || await requestSubtitleFile();
 
     if (!subtitleFile) {
@@ -68,6 +73,7 @@ export default defineContentScript({
           <OverlayApp
             initialSubtitleCues={subtitleFile.cues}
             initialSubtitleFileName={subtitleFile.fileName}
+            initialTypingProgress={storedTypingProgress}
             pageUrl={pageUrl}
             shadowRoot={container.getRootNode() as ShadowRoot}
             targetId={targetId}

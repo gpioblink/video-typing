@@ -45,3 +45,7 @@ export interface StoredSubtitleData {
   fileName: string;
   cues: SubtitleCue[];
 }
+
+export interface StoredTypingProgressData {
+  [frameId: string]: ID[];
+}

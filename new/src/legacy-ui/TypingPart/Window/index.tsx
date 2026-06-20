@@ -13,21 +13,28 @@ export interface GameChar {
 
 interface Props {
   frame: CaptionFrame;
+  initialFinishedCharIds: ID[];
   sendCompleted: () => void;
   requestExplanation: (query: string) => void;
   sendMistake: (reason: TagContent) => void;
+  onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
 }
 
-function initializeGame(frame: CaptionFrame) {
+function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
+  const finishedCharIds = new Set(initialFinishedCharIds);
   const gameChars = frame.caption.map((char) => ({
     char,
     input: '_',
-    status: 'wait' as TypingStatus,
+    status: (
+      char.isTypeable && finishedCharIds.has(char.id)
+        ? 'finished'
+        : 'wait'
+    ) as TypingStatus,
   }));
 
-  const firstTypeable = gameChars.find((char) => char.char.isTypeable);
-  if (firstTypeable) {
-    firstTypeable.status = 'available';
+  const firstWaitingTypeable = gameChars.find((char) => char.char.isTypeable && char.status === 'wait');
+  if (firstWaitingTypeable) {
+    firstWaitingTypeable.status = 'available';
   }
 
   return {
@@ -40,15 +47,32 @@ function charsToString(chars: Char[]) {
   return chars.map((char) => char.char).join('');
 }
 
-export function Window({ frame, sendCompleted, requestExplanation, sendMistake }: Props) {
-  const [game, setGame] = useState(() => initializeGame(frame));
+export function Window({
+  frame,
+  initialFinishedCharIds,
+  sendCompleted,
+  requestExplanation,
+  sendMistake,
+  onFinishedCharIdsChange,
+}: Props) {
+  const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
   const keyboardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setGame(initializeGame(frame));
+    setGame(initializeGame(frame, initialFinishedCharIds));
     setKeyboardLog([]);
   }, [frame.id]);
+
+  const finishedCharIds = useMemo(() => (
+    game.gameChars
+      .filter((char) => char.status === 'finished' && char.char.isTypeable)
+      .map((char) => char.char.id)
+  ), [game.gameChars]);
+
+  useEffect(() => {
+    onFinishedCharIdsChange(finishedCharIds);
+  }, [finishedCharIds, onFinishedCharIdsChange]);
 
   const splitCharsByNewLine = useMemo(() => {
     const rows: GameChar[][] = [[]];
