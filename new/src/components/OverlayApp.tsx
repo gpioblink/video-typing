@@ -6,7 +6,6 @@ import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
-import { mockWords } from '../data/mockData';
 import { searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
   saveStoredPlaybackPosition,
@@ -49,7 +48,7 @@ export function OverlayApp({
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [hintWords, setHintWords] = useState<DictionaryWord[]>(mockWords);
+  const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
