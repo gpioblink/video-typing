@@ -42,6 +42,13 @@ export interface PanelPosition {
 
 export type StoredPanelPositions = Record<string, Partial<Record<PanelKind, PanelPosition>>>;
 
+export interface PanelSize {
+  width: number;
+  height: number;
+}
+
+export type StoredPanelSizes = Record<string, Partial<Record<PanelKind, PanelSize>>>;
+
 export type SubtitleFormat = 'srt' | 'ttml' | 'vtt';
 
 export interface SubtitleCue {

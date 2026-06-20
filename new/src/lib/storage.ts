@@ -2,8 +2,10 @@ import type {
   ID,
   PanelKind,
   PanelPosition,
+  PanelSize,
   StoredFrameProgressData,
   StoredPanelPositions,
+  StoredPanelSizes,
   StoredPlaybackPositionData,
   StoredSubtitleData,
   Tag,
@@ -11,6 +13,7 @@ import type {
 } from '../types';
 
 const STORAGE_KEY = 'videoTypingPrototypePanelPositions';
+const PANEL_SIZE_STORAGE_KEY = 'videoTypingPrototypePanelSizes';
 const SUBTITLE_STORAGE_KEY = 'videoTypingPrototypeSubtitles';
 const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
 const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
@@ -32,6 +35,25 @@ export async function savePanelPosition(hostname: string, kind: PanelKind, posit
     },
   };
   await chrome.storage.local.set({ [STORAGE_KEY]: next });
+}
+
+export async function loadPanelSize(hostname: string, kind: PanelKind) {
+  const result = await chrome.storage.local.get(PANEL_SIZE_STORAGE_KEY);
+  const sizes = (result[PANEL_SIZE_STORAGE_KEY] || {}) as StoredPanelSizes;
+  return sizes[hostname]?.[kind];
+}
+
+export async function savePanelSize(hostname: string, kind: PanelKind, size: PanelSize) {
+  const result = await chrome.storage.local.get(PANEL_SIZE_STORAGE_KEY);
+  const sizes = (result[PANEL_SIZE_STORAGE_KEY] || {}) as StoredPanelSizes;
+  const next = {
+    ...sizes,
+    [hostname]: {
+      ...(sizes[hostname] || {}),
+      [kind]: size,
+    },
+  };
+  await chrome.storage.local.set({ [PANEL_SIZE_STORAGE_KEY]: next });
 }
 
 export async function loadStoredSubtitle(url: string) {

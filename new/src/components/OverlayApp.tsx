@@ -230,7 +230,12 @@ export function OverlayApp({
   return (
     <CacheProvider value={cache}>
       <div style={overlayStyle}>
-        <DraggablePanel kind="typing" title="Typing" defaultPosition={{ x: 24, y: 220 }}>
+        <DraggablePanel
+          kind="typing"
+          title="Typing"
+          defaultPosition={{ x: 24, y: 220 }}
+          defaultSize={{ width: 760, height: 260 }}
+        >
           <Window
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
@@ -241,10 +246,20 @@ export function OverlayApp({
             onTagsChange={handleTagsChange}
           />
         </DraggablePanel>
-        <DraggablePanel kind="hint" title="Hint" defaultPosition={{ x: 700, y: 120 }}>
+        <DraggablePanel
+          kind="hint"
+          title="Hint"
+          defaultPosition={{ x: 700, y: 120 }}
+          defaultSize={{ width: 360, height: 400 }}
+        >
           <Hint words={hintWords} />
         </DraggablePanel>
-        <DraggablePanel kind="debug" title="Debug" defaultPosition={{ x: 24, y: 24 }}>
+        <DraggablePanel
+          kind="debug"
+          title="Debug"
+          defaultPosition={{ x: 24, y: 24 }}
+          defaultSize={{ width: 340, height: 260 }}
+        >
           <DebugPanel
             targetId={targetId}
             currentTime={currentTime}
@@ -264,7 +279,12 @@ export function OverlayApp({
             }}
           />
         </DraggablePanel>
-        <DraggablePanel kind="subtitle" title="Subtitle" defaultPosition={{ x: 180, y: 520 }}>
+        <DraggablePanel
+          kind="subtitle"
+          title="Subtitle"
+          defaultPosition={{ x: 180, y: 520 }}
+          defaultSize={{ width: 520, height: 180 }}
+        >
           <SubtitlePanel
             cueText={activeCue?.text || ''}
             fileName={subtitleFileName}

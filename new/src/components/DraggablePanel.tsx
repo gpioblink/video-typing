@@ -1,45 +1,85 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { loadPanelPosition, savePanelPosition } from '../lib/storage';
-import type { PanelKind, PanelPosition } from '../types';
+import {
+  loadPanelPosition,
+  loadPanelSize,
+  savePanelPosition,
+  savePanelSize,
+} from '../lib/storage';
+import type { PanelKind, PanelPosition, PanelSize } from '../types';
 
 interface Props {
   kind: PanelKind;
   title: string;
   defaultPosition: PanelPosition;
+  defaultSize: PanelSize;
   children: React.ReactNode;
 }
 
-export function DraggablePanel({ kind, title, defaultPosition, children }: Props) {
+const MIN_PANEL_WIDTH = 240;
+const MIN_PANEL_HEIGHT = 160;
+
+export function DraggablePanel({ kind, title, defaultPosition, defaultSize, children }: Props) {
   const hostname = window.location.hostname;
   const [position, setPosition] = useState(defaultPosition);
+  const [size, setSize] = useState(defaultSize);
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sizeRef = useRef(size);
+  const positionRef = useRef(position);
 
-  const clampPosition = (next: PanelPosition) => ({
-    x: Math.max(0, Math.min(next.x, window.innerWidth - 120)),
-    y: Math.max(0, Math.min(next.y, window.innerHeight - 80)),
+  const clampSize = (next: PanelSize) => ({
+    width: Math.max(MIN_PANEL_WIDTH, Math.min(next.width, window.innerWidth - 16)),
+    height: Math.max(MIN_PANEL_HEIGHT, Math.min(next.height, window.innerHeight - 16)),
+  });
+
+  const clampPosition = (next: PanelPosition, nextSize = sizeRef.current) => ({
+    x: Math.max(0, Math.min(next.x, window.innerWidth - nextSize.width)),
+    y: Math.max(0, Math.min(next.y, window.innerHeight - nextSize.height)),
   });
 
   useEffect(() => {
     loadPanelPosition(hostname, kind).then((saved) => {
       if (saved) {
-        setPosition(clampPosition(saved));
+        const nextPosition = clampPosition(saved);
+        positionRef.current = nextPosition;
+        setPosition(nextPosition);
+      }
+    });
+    loadPanelSize(hostname, kind).then((saved) => {
+      if (saved) {
+        const nextSize = clampSize(saved);
+        sizeRef.current = nextSize;
+        setSize(nextSize);
+        const nextPosition = clampPosition(positionRef.current, nextSize);
+        positionRef.current = nextPosition;
+        setPosition(nextPosition);
       }
     });
   }, [hostname, kind]);
 
   useEffect(() => {
+    sizeRef.current = size;
+  }, [size]);
+
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
+
+  useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {
       if (!dragRef.current) return;
-      setPosition(clampPosition({
+      const nextPosition = clampPosition({
         x: Math.max(0, dragRef.current.startX + event.clientX - dragRef.current.x),
         y: Math.max(0, dragRef.current.startY + event.clientY - dragRef.current.y),
-      }));
+      });
+      positionRef.current = nextPosition;
+      setPosition(nextPosition);
     };
 
     const onMouseUp = () => {
       if (!dragRef.current) return;
       dragRef.current = null;
-      void savePanelPosition(hostname, kind, position);
+      void savePanelPosition(hostname, kind, positionRef.current);
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -48,21 +88,87 @@ export function DraggablePanel({ kind, title, defaultPosition, children }: Props
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [hostname, kind, position]);
+  }, [hostname, kind]);
+
+  useEffect(() => {
+    const panelElement = panelRef.current;
+
+    if (!panelElement) {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+
+      if (!entry) {
+        return;
+      }
+
+      const nextSize = clampSize({
+        width: Math.round(entry.contentRect.width),
+        height: Math.round(entry.contentRect.height),
+      });
+
+      if (nextSize.width === sizeRef.current.width && nextSize.height === sizeRef.current.height) {
+        return;
+      }
+
+      sizeRef.current = nextSize;
+      setSize(nextSize);
+
+      const nextPosition = clampPosition(positionRef.current, nextSize);
+      positionRef.current = nextPosition;
+      setPosition(nextPosition);
+
+      void savePanelSize(hostname, kind, nextSize);
+      void savePanelPosition(hostname, kind, nextPosition);
+    });
+
+    resizeObserver.observe(panelElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [hostname, kind]);
+
+  useEffect(() => {
+    const onWindowResize = () => {
+      const nextSize = clampSize(sizeRef.current);
+      const nextPosition = clampPosition(positionRef.current, nextSize);
+
+      sizeRef.current = nextSize;
+      positionRef.current = nextPosition;
+      setSize(nextSize);
+      setPosition(nextPosition);
+    };
+
+    window.addEventListener('resize', onWindowResize);
+
+    return () => {
+      window.removeEventListener('resize', onWindowResize);
+    };
+  }, []);
 
   return (
     <div
+      ref={panelRef}
       style={{
         position: 'fixed',
         left: position.x,
         top: position.y,
         pointerEvents: 'auto',
-        minWidth: '240px',
+        width: size.width,
+        height: size.height,
+        minWidth: `${MIN_PANEL_WIDTH}px`,
+        minHeight: `${MIN_PANEL_HEIGHT}px`,
         background: '#24353d',
         color: '#ecf2f1',
         borderRadius: '14px',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
         overflow: 'hidden',
+        resize: 'both',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       <div
@@ -87,7 +193,16 @@ export function DraggablePanel({ kind, title, defaultPosition, children }: Props
       >
         {title}
       </div>
-      <div style={{ padding: kind === 'typing' ? '16px 18px' : '12px' }}>{children}</div>
+      <div
+        style={{
+          padding: kind === 'typing' ? '16px 18px' : '12px',
+          overflow: 'auto',
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
