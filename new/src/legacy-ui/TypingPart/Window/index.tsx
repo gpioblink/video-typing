@@ -49,23 +49,38 @@ function charsToString(chars: Char[]) {
   return chars.map((char) => char.char).join('');
 }
 
+function getWordInfo(frame: CaptionFrame, currentCharId: ID) {
+  const charIndex = frame.caption.findIndex((char) => char.id === currentCharId);
+
+  if (charIndex === -1 || !frame.caption[charIndex]?.isTypeable) {
+    return null;
+  }
+
+  let wordStartIndex = charIndex;
+  while (wordStartIndex > 0 && frame.caption[wordStartIndex - 1]?.isTypeable) {
+    wordStartIndex -= 1;
+  }
+
+  let wordEndIndex = charIndex;
+  while (wordEndIndex + 1 < frame.caption.length && frame.caption[wordEndIndex + 1]?.isTypeable) {
+    wordEndIndex += 1;
+  }
+
+  return {
+    targetCharIds: frame.caption.slice(wordStartIndex, wordEndIndex + 1).map((char) => char.id),
+    query: charsToString(frame.caption.slice(wordStartIndex, wordEndIndex + 1)),
+  };
+}
+
 function createMistakeTag(
   frame: CaptionFrame,
   keyboardLog: Array<{ currentCharId: ID; isCorrect: boolean }>,
   currentCharId: ID,
 ) {
-  const charIndex = frame.caption.findIndex((char) => char.id === currentCharId);
-  if (charIndex === -1) return null;
+  const wordInfo = getWordInfo(frame, currentCharId);
+  if (!wordInfo) return null;
 
-  const targetCharIds: string[] = [];
-  let wordHeadIndex = 0;
-
-  for (wordHeadIndex = charIndex; wordHeadIndex >= 0; wordHeadIndex -= 1) {
-    if (!frame.caption[wordHeadIndex].isTypeable) break;
-    targetCharIds.push(frame.caption[wordHeadIndex].id);
-  }
-
-  const targetLogs = keyboardLog.filter((log) => targetCharIds.includes(log.currentCharId));
+  const targetLogs = keyboardLog.filter((log) => wordInfo.targetCharIds.includes(log.currentCharId));
   const missCount = targetLogs.filter((log) => !log.isCorrect).length;
 
   if (missCount === 0) return null;
@@ -75,10 +90,10 @@ function createMistakeTag(
 
   return {
     content,
-    query: charsToString(frame.caption.slice(wordHeadIndex + 1, charIndex + 1)),
+    query: wordInfo.query,
     tag: {
       id: crypto.randomUUID(),
-      pastedCharIds: targetCharIds,
+      pastedCharIds: wordInfo.targetCharIds,
       content,
     } satisfies Tag,
   };
@@ -99,6 +114,7 @@ export function Window({
   const gameRef = useRef(game);
   const keyboardLogRef = useRef(keyboardLog);
   const keyboardRef = useRef<HTMLDivElement>(null);
+  const hintedWordKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const nextGame = initializeGame(frame, initialFinishedCharIds);
@@ -106,6 +122,7 @@ export function Window({
     setGame(nextGame);
     keyboardLogRef.current = [];
     setKeyboardLog([]);
+    hintedWordKeysRef.current = new Set();
   }, [frame.id]);
 
   useEffect(() => {
@@ -202,6 +219,20 @@ export function Window({
             sendCompleted();
           }
         } else {
+          const wordInfo = getWordInfo(frame, nextChars[inputIndex].char.id);
+
+          if (wordInfo) {
+            const missCount = nextKeyboardLog.filter((log) => (
+              !log.isCorrect && wordInfo.targetCharIds.includes(log.currentCharId)
+            )).length;
+            const wordKey = wordInfo.targetCharIds.join(',');
+
+            if (missCount >= 3 && !hintedWordKeysRef.current.has(wordKey)) {
+              hintedWordKeysRef.current.add(wordKey);
+              requestExplanation(wordInfo.query);
+            }
+          }
+
           nextChars[inputIndex] = {
             ...nextChars[inputIndex],
             status: 'mistaken',
