@@ -5,9 +5,8 @@ export const Layout = styled.div`
   color: #dddddd;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  width: 320px;
-  max-height: 360px;
+  width: 100%;
+  min-height: 100%;
 
   .item {
     padding: 14px 16px 10px;

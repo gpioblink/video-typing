@@ -50,6 +50,7 @@ export function OverlayApp({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>(mockWords);
+  const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
 
@@ -104,9 +105,11 @@ export function OverlayApp({
     };
   }, [pageUrl]);
 
-  const activeCue = useMemo(() => {
+  const timelineCue = useMemo(() => {
     return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
   }, [currentTime, subtitleCues]);
+
+  const activeCue = loopCue || timelineCue;
 
   const activeFrame = useMemo(() => {
     if (activeCue) {
@@ -131,6 +134,18 @@ export function OverlayApp({
 
     return typeableCharCount === 0 || activeProgress.finishedCharIds.length >= typeableCharCount;
   }, [activeFrame.caption, activeProgress.finishedCharIds]);
+
+  useEffect(() => {
+    if (!loopCue && timelineCue && !isActiveFrameComplete) {
+      setLoopCue(timelineCue);
+    }
+  }, [isActiveFrameComplete, loopCue, timelineCue]);
+
+  useEffect(() => {
+    if (loopCue && isActiveFrameComplete) {
+      setLoopCue(null);
+    }
+  }, [isActiveFrameComplete, loopCue]);
 
   useEffect(() => {
     if (!activeCue || isActiveFrameComplete) {
