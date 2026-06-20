@@ -92,6 +92,11 @@ function OptionsApp() {
     }
   };
 
+  const openLocalPlayer = (hash = '') => {
+    const url = chrome.runtime.getURL(`player.html${hash}`);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <main className="page">
       <section className="panel">
@@ -105,6 +110,15 @@ function OptionsApp() {
             <strong>{total.toLocaleString()}</strong>
           </div>
         </header>
+
+        <div className="playerLinks">
+          <button type="button" onClick={() => openLocalPlayer()}>
+            Open built-in player
+          </button>
+          <button type="button" onClick={() => openLocalPlayer('#history')}>
+            Open built-in player history
+          </button>
+        </div>
 
         <label className="dropzone">
           <input

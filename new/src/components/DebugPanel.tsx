@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { getVideoElement, seekVideo } from '../lib/video';
+import { isChineseTypingJsonFile, parseChineseTypingJson } from '../lib/chineseTyping';
 import { parseSubtitleFile } from '../lib/subtitles';
-import type { SubtitleCue } from '../types';
+import type { SubtitleCue, TimedCaptionFrame } from '../types';
 
 interface Props {
   targetId: string;
@@ -9,7 +10,7 @@ interface Props {
   duration: number;
   subtitleFileName: string;
   subtitleError: string;
-  onSubtitleLoaded: (cues: SubtitleCue[], fileName: string) => void;
+  onSubtitleLoaded: (cues: SubtitleCue[], fileName: string, typingFrames?: TimedCaptionFrame[]) => void;
   onSubtitleError: (message: string) => void;
 }
 
@@ -50,7 +51,7 @@ export function DebugPanel({
         <span>Subtitle file</span>
         <input
           type="file"
-          accept=".srt,.vtt,.ttml,.xml,.txt"
+          accept=".srt,.vtt,.ttml,.xml,.txt,.json"
           onChange={async (event) => {
             const file = event.target.files?.[0];
 
@@ -60,6 +61,27 @@ export function DebugPanel({
 
             try {
               const text = await file.text();
+
+              if (isChineseTypingJsonFile(file.name)) {
+                const chineseTypingJson = parseChineseTypingJson(file.name, text);
+                const sourceSubtitleFile = await selectSourceSubtitleFile();
+
+                if (!sourceSubtitleFile) {
+                  onSubtitleError('Original Chinese subtitle file is required.');
+                  return;
+                }
+
+                const sourceText = await sourceSubtitleFile.text();
+                const sourceCues = parseSubtitleFile(sourceSubtitleFile.name, sourceText);
+
+                if (sourceCues.length === 0) {
+                  onSubtitleError('No usable original subtitle cues found.');
+                } else {
+                  onSubtitleLoaded(sourceCues, sourceSubtitleFile.name, chineseTypingJson.typingFrames);
+                }
+                return;
+              }
+
               const cues = parseSubtitleFile(file.name, text);
 
               if (cues.length === 0) {
@@ -89,3 +111,19 @@ const rowStyle: React.CSSProperties = {
   display: 'flex',
   gap: 8,
 };
+
+function selectSourceSubtitleFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.srt,.vtt,.ttml,.xml,.txt';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0] || null;
+      input.remove();
+      resolve(file);
+    });
+    document.body.append(input);
+    input.click();
+  });
+}

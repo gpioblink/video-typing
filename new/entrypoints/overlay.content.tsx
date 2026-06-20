@@ -10,17 +10,20 @@ import {
   saveStoredPlaybackPosition,
   saveStoredSubtitle,
 } from '../src/lib/storage';
+import { isChineseTypingJsonFile, parseChineseTypingJson } from '../src/lib/chineseTyping';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
 const VIDEO_ATTR = 'data-video-typing-target-id';
-const SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt';
+const SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt,.json';
+const SOURCE_SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt';
 
 interface LoadedSubtitleFile {
   cues: StoredSubtitleData['cues'];
   fileName: string;
+  typingFrames?: StoredSubtitleData['typingFrames'];
 }
 
 declare global {
@@ -68,7 +71,7 @@ export default defineContentScript({
     video.setAttribute(VIDEO_ATTR, targetId);
     await restorePlaybackPosition(
       video,
-      getResumePlaybackPosition(subtitleFile.cues, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
+      getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
     );
 
     const ui = await createShadowRootUi(ctx, {
@@ -85,6 +88,7 @@ export default defineContentScript({
           <OverlayApp
             initialSubtitleCues={subtitleFile.cues}
             initialSubtitleFileName={subtitleFile.fileName}
+            initialTypingFrames={subtitleFile.typingFrames}
             initialTypingProgress={storedTypingProgress}
             pageUrl={pageUrl}
             shadowRoot={container.getRootNode() as ShadowRoot}
@@ -117,6 +121,11 @@ async function requestSubtitleFile(): Promise<LoadedSubtitleFile | null> {
 
   try {
     const text = await file.text();
+
+    if (isChineseTypingJsonFile(file.name)) {
+      return await requestChineseTypingJsonFiles(file.name, text);
+    }
+
     const cues = parseSubtitleFile(file.name, text);
 
     if (cues.length === 0) {
@@ -129,6 +138,45 @@ async function requestSubtitleFile(): Promise<LoadedSubtitleFile | null> {
     };
   } catch {
     return null;
+  }
+}
+
+async function requestChineseTypingJsonFiles(fileName: string, text: string): Promise<LoadedSubtitleFile | null> {
+  const progressPanel = createSubtitleImportProgressPanel();
+
+  try {
+    progressPanel.setMessage('Reading Chinese typing JSON...');
+    const chineseTypingJson = parseChineseTypingJson(fileName, text);
+
+    progressPanel.setMessage('Choose the original Chinese subtitle file.');
+    const sourceSubtitleFile = await selectSubtitleFile({
+      title: 'Original subtitle required',
+      description: 'Choose the original Chinese subtitle file for the Subtitle window.',
+      accept: SOURCE_SUBTITLE_ACCEPT,
+    });
+
+    if (!sourceSubtitleFile) {
+      return null;
+    }
+
+    progressPanel.setMessage('Parsing original subtitle...');
+    const sourceText = await sourceSubtitleFile.text();
+    const sourceCues = parseSubtitleFile(sourceSubtitleFile.name, sourceText);
+
+    if (sourceCues.length === 0) {
+      return null;
+    }
+
+    progressPanel.setMessage('Chinese typing data loaded.');
+    return {
+      cues: sourceCues,
+      fileName: sourceSubtitleFile.name,
+      typingFrames: chineseTypingJson.typingFrames,
+    };
+  } catch {
+    return null;
+  } finally {
+    progressPanel.remove();
   }
 }
 
@@ -159,35 +207,43 @@ async function restorePlaybackPosition(video: HTMLVideoElement, currentTime?: nu
 }
 
 function getResumePlaybackPosition(
-  cues: StoredSubtitleData['cues'],
+  subtitle: StoredSubtitleData,
   typingProgress: Awaited<ReturnType<typeof loadStoredTypingProgress>>,
 ) {
-  let latestCueByUpdate: StoredSubtitleData['cues'][number] | null = null;
+  let latestStartByUpdate: number | null = null;
   let latestUpdatedAt = Number.NEGATIVE_INFINITY;
-  let latestCueByOrder: StoredSubtitleData['cues'][number] | null = null;
+  let latestStartByOrder: number | null = null;
+  const frames = subtitle.typingFrames || subtitle.cues.map((cue) => ({
+    ...subtitleCueToCaptionFrame(cue),
+    start: cue.start,
+    end: cue.end,
+  }));
 
-  for (const cue of cues) {
-    const frameId = subtitleCueToCaptionFrame(cue).id;
-    const progress = typingProgress[frameId];
+  for (const frame of frames) {
+    const progress = typingProgress[frame.id];
 
     if (!progress) {
       continue;
     }
 
     if (progress.finishedCharIds.length > 0 || progress.tags.length > 0 || typeof progress.updatedAt === 'number') {
-      latestCueByOrder = cue;
+      latestStartByOrder = frame.start;
     }
 
     if (typeof progress.updatedAt === 'number' && progress.updatedAt >= latestUpdatedAt) {
       latestUpdatedAt = progress.updatedAt;
-      latestCueByUpdate = cue;
+      latestStartByUpdate = frame.start;
     }
   }
 
-  return latestCueByUpdate?.start ?? latestCueByOrder?.start;
+  return latestStartByUpdate ?? latestStartByOrder ?? undefined;
 }
 
-function selectSubtitleFile(): Promise<File | null> {
+function selectSubtitleFile(options?: {
+  title?: string;
+  description?: string;
+  accept?: string;
+}): Promise<File | null> {
   return new Promise((resolve) => {
     const panel = document.createElement('div');
     const title = document.createElement('div');
@@ -223,15 +279,15 @@ function selectSubtitleFile(): Promise<File | null> {
     };
 
     input.type = 'file';
-    input.accept = SUBTITLE_ACCEPT;
+    input.accept = options?.accept || SUBTITLE_ACCEPT;
     input.style.display = 'none';
     input.addEventListener('change', () => {
       waitingForPicker = false;
       finish(input.files?.[0] || null);
     });
 
-    title.textContent = 'Subtitle file required';
-    description.textContent = 'Click "Choose file" below to open the subtitle picker and start video-typing.';
+    title.textContent = options?.title || 'Subtitle file required';
+    description.textContent = options?.description || 'Click "Choose file" below to open the subtitle picker and start video-typing.';
     chooseButton.textContent = 'Choose file';
     cancelButton.textContent = 'Cancel';
     cancelButton.addEventListener('click', () => finish(null));
@@ -294,4 +350,49 @@ function selectSubtitleFile(): Promise<File | null> {
     panel.append(title, description, actions, input);
     document.body.append(panel);
   });
+}
+
+function createSubtitleImportProgressPanel() {
+  const panel = document.createElement('div');
+  const title = document.createElement('div');
+  const message = document.createElement('div');
+
+  title.textContent = 'Processing subtitle';
+  message.textContent = 'Starting...';
+
+  Object.assign(panel.style, {
+    position: 'fixed',
+    top: '16px',
+    right: '16px',
+    zIndex: '2147483647',
+    width: '320px',
+    padding: '14px',
+    borderRadius: '10px',
+    background: 'rgba(30, 36, 45, 0.98)',
+    color: '#fff',
+    fontFamily: 'system-ui, sans-serif',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+  });
+  Object.assign(title.style, {
+    fontSize: '14px',
+    fontWeight: '700',
+    marginBottom: '6px',
+  });
+  Object.assign(message.style, {
+    fontSize: '12px',
+    lineHeight: '1.45',
+    opacity: '0.85',
+  });
+
+  panel.append(title, message);
+  document.body.append(panel);
+
+  return {
+    setMessage(nextMessage: string) {
+      message.textContent = nextMessage;
+    },
+    remove() {
+      panel.remove();
+    },
+  };
 }

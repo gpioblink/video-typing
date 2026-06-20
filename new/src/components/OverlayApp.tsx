@@ -20,6 +20,7 @@ import type {
   StoredTypingProgressData,
   SubtitleCue,
   Tag,
+  TimedCaptionFrame,
 } from '../types';
 
 const LOOP_START_PADDING_SECONDS = 1;
@@ -29,21 +30,34 @@ interface Props {
   initialSubtitleCues: SubtitleCue[];
   initialSubtitleFileName: string;
   initialTypingProgress: StoredTypingProgressData;
+  initialTypingFrames?: TimedCaptionFrame[];
+  displaySubtitleCues?: SubtitleCue[];
+  displaySubtitleFileName?: string;
+  showDebugPanel?: boolean;
+  onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => void;
+  onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
   pageUrl: string;
   targetId: string;
-  shadowRoot: ShadowRoot;
+  shadowRoot: Node;
 }
 
 export function OverlayApp({
   initialSubtitleCues,
   initialSubtitleFileName,
   initialTypingProgress,
+  initialTypingFrames,
+  displaySubtitleCues,
+  displaySubtitleFileName,
+  showDebugPanel = true,
+  onFrameMistake,
+  onFrameCompleted,
   pageUrl,
   shadowRoot,
   targetId,
 }: Props) {
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>(initialSubtitleCues);
   const [subtitleFileName, setSubtitleFileName] = useState(initialSubtitleFileName);
+  const [typingFrames, setTypingFrames] = useState<TimedCaptionFrame[] | undefined>(initialTypingFrames);
   const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,6 +66,7 @@ export function OverlayApp({
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const mistakeCountsRef = useRef<Record<string, number>>({});
 
   const cache = useMemo(() => {
     return createCache({
@@ -112,7 +127,39 @@ export function OverlayApp({
   // into the padded pre/post-roll area around that cue.
   const activeCue = loopCue || timelineCue;
 
+  const displayCue = useMemo(() => {
+    if (!activeCue || !displaySubtitleCues?.length) {
+      return activeCue;
+    }
+
+    const cueTime = (activeCue.start + activeCue.end) / 2;
+    return displaySubtitleCues.find((cue) => cue.start <= cueTime && cueTime < cue.end) || activeCue;
+  }, [activeCue, displaySubtitleCues]);
+
+  const activeTypingFrame = useMemo(() => {
+    if (!activeCue || !typingFrames?.length) {
+      return null;
+    }
+
+    const cueTime = (activeCue.start + activeCue.end) / 2;
+    return typingFrames.find((frame) => (
+      frame.start === activeCue.start &&
+      frame.end === activeCue.end
+    )) || typingFrames.find((frame) => (
+      frame.start <= cueTime && cueTime < frame.end
+    )) || null;
+  }, [activeCue, typingFrames]);
+
   const activeFrame = useMemo(() => {
+    if (activeTypingFrame) {
+      const storedProgress = typingProgress[activeTypingFrame.id];
+
+      return {
+        ...activeTypingFrame,
+        tags: storedProgress?.tags || activeTypingFrame.tags || [],
+      };
+    }
+
     if (activeCue) {
       const frame = subtitleCueToCaptionFrame(activeCue);
       const storedProgress = typingProgress[frame.id];
@@ -124,7 +171,7 @@ export function OverlayApp({
     }
 
     return emptyCaptionFrame();
-  }, [activeCue, typingProgress]);
+  }, [activeCue, activeTypingFrame, typingProgress]);
 
   const activeProgress = useMemo<StoredFrameProgressData>(() => {
     return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
@@ -210,6 +257,27 @@ export function OverlayApp({
     });
   }, [activeFrame.id, pageUrl]);
 
+  const handleMistakeInput = useCallback(() => {
+    if (!activeCue) {
+      return;
+    }
+
+    const nextCount = (mistakeCountsRef.current[activeFrame.id] || 0) + 1;
+    mistakeCountsRef.current = {
+      ...mistakeCountsRef.current,
+      [activeFrame.id]: nextCount,
+    };
+    onFrameMistake?.(activeCue, nextCount);
+  }, [activeCue, activeFrame.id, onFrameMistake]);
+
+  const handleFrameCompleted = useCallback(() => {
+    if (!activeCue) {
+      return;
+    }
+
+    void onFrameCompleted?.(activeCue);
+  }, [activeCue, onFrameCompleted]);
+
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
       const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
@@ -280,9 +348,10 @@ export function OverlayApp({
           <Window
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
-            sendCompleted={() => {}}
+            sendCompleted={handleFrameCompleted}
             requestExplanation={handleRequestExplanation}
             sendMistake={() => {}}
+            onMistakeInput={handleMistakeInput}
             onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}
@@ -296,31 +365,37 @@ export function OverlayApp({
         >
           <Hint words={hintWords} />
         </DraggablePanel>
-        <DraggablePanel
-          kind="debug"
-          title="Debug"
-          defaultPosition={{ x: 24, y: 24 }}
-          defaultSize={{ width: 340, height: 260 }}
-        >
-          <DebugPanel
-            targetId={targetId}
-            currentTime={currentTime}
-            duration={duration}
-            subtitleFileName={subtitleFileName}
-            subtitleError={subtitleError}
-            onSubtitleLoaded={(cues, fileName) => {
-              void saveStoredSubtitle(pageUrl, { cues, fileName });
-              setSubtitleCues(cues);
-              setSubtitleFileName(fileName);
-              setSubtitleError('');
-            }}
-            onSubtitleError={(message) => {
-              setSubtitleCues([]);
-              setSubtitleFileName('');
-              setSubtitleError(message);
-            }}
-          />
-        </DraggablePanel>
+        {showDebugPanel ? (
+          <DraggablePanel
+            kind="debug"
+            title="Debug"
+            defaultPosition={{ x: 24, y: 24 }}
+            defaultSize={{ width: 340, height: 260 }}
+          >
+            <DebugPanel
+              targetId={targetId}
+              currentTime={currentTime}
+              duration={duration}
+              subtitleFileName={subtitleFileName}
+              subtitleError={subtitleError}
+              onSubtitleLoaded={(cues, fileName, nextTypingFrames) => {
+                void saveStoredSubtitle(
+                  pageUrl,
+                  nextTypingFrames ? { cues, fileName, typingFrames: nextTypingFrames } : { cues, fileName },
+                );
+                setSubtitleCues(cues);
+                setTypingFrames(nextTypingFrames);
+                setSubtitleFileName(fileName);
+                setSubtitleError('');
+              }}
+              onSubtitleError={(message) => {
+                setSubtitleCues([]);
+                setSubtitleFileName('');
+                setSubtitleError(message);
+              }}
+            />
+          </DraggablePanel>
+        ) : null}
         <DraggablePanel
           kind="subtitle"
           title="Subtitle"
@@ -328,8 +403,8 @@ export function OverlayApp({
           defaultSize={{ width: 520, height: 180 }}
         >
           <SubtitlePanel
-            cueText={activeCue?.text || ''}
-            fileName={subtitleFileName}
+            cueText={displayCue?.text || ''}
+            fileName={displaySubtitleFileName || subtitleFileName}
           />
         </DraggablePanel>
       </div>

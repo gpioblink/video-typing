@@ -19,6 +19,27 @@ export interface CaptionFrame {
   tags: Tag[];
 }
 
+export interface ChineseTypingWord {
+  sourceText: string;
+  pinyin: string;
+  startCharId: ID;
+  endCharId: ID;
+  dictionaryFound: boolean;
+}
+
+export interface TimedCaptionFrame extends CaptionFrame {
+  start: number;
+  end: number;
+  words?: ChineseTypingWord[];
+}
+
+export interface ChineseTypingJson {
+  format: 'video-typing-chinese-v1';
+  sourceFileName: string;
+  typingFrames: TimedCaptionFrame[];
+  sourceCues: SubtitleCue[];
+}
+
 export interface DictionaryWord {
   title: string;
   content: string;
@@ -60,6 +81,7 @@ export interface SubtitleCue {
 export interface StoredSubtitleData {
   fileName: string;
   cues: SubtitleCue[];
+  typingFrames?: TimedCaptionFrame[];
 }
 
 export interface StoredFrameProgressData {
@@ -74,4 +96,18 @@ export interface StoredTypingProgressData {
 
 export interface StoredPlaybackPositionData {
   currentTime: number;
+}
+
+export interface StoredLocalPlayerSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  mainVideoHandle: FileSystemFileHandle;
+  nativeAudioHandle?: FileSystemFileHandle;
+  subtitleFileName: string;
+  subtitleCues: SubtitleCue[];
+  typingFrames?: TimedCaptionFrame[];
+  nativeSubtitleFileName?: string;
+  nativeSubtitleCues?: SubtitleCue[];
 }

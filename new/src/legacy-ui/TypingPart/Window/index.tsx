@@ -17,6 +17,7 @@ interface Props {
   sendCompleted: () => void;
   requestExplanation: (query: string, options?: { silentIfMissing?: boolean }) => void;
   sendMistake: (reason: TagContent) => void;
+  onMistakeInput?: () => void;
   onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
@@ -128,6 +129,7 @@ export function Window({
   sendCompleted,
   requestExplanation,
   sendMistake,
+  onMistakeInput,
   onFrameInteracted,
   onFinishedCharIdsChange,
   onTagsChange,
@@ -255,6 +257,7 @@ export function Window({
             sendCompleted();
           }
         } else {
+          onMistakeInput?.();
           const wordInfo = getWordInfo(frame, nextChars[inputIndex].char.id);
 
           if (wordInfo) {
