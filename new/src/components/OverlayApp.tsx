@@ -13,7 +13,7 @@ import {
   saveStoredTypingProgress,
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
-import { getVideoElement } from '../lib/video';
+import { getVideoElement, seekVideo } from '../lib/video';
 import type {
   DictionaryWord,
   StoredFrameProgressData,
@@ -21,6 +21,9 @@ import type {
   SubtitleCue,
   Tag,
 } from '../types';
+
+const LOOP_END_PADDING_SECONDS = 1;
+const NEXT_CUE_GUARD_SECONDS = 0.1;
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -47,6 +50,7 @@ export function OverlayApp({
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>(mockWords);
   const currentTimeRef = useRef(0);
+  const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
 
   const cache = useMemo(() => {
     return createCache({
@@ -58,8 +62,23 @@ export function OverlayApp({
   useEffect(() => {
     const timer = window.setInterval(() => {
       const video = getVideoElement(targetId);
-      setCurrentTime(video?.currentTime || 0);
-      setDuration(video?.duration || 0);
+      if (!video) {
+        setCurrentTime(0);
+        setDuration(0);
+        return;
+      }
+
+      const loopRange = loopRangeRef.current;
+
+      if (loopRange && video.currentTime >= loopRange.end) {
+        seekVideo(targetId, loopRange.start);
+        setCurrentTime(loopRange.start);
+        setDuration(video.duration || 0);
+        return;
+      }
+
+      setCurrentTime(video.currentTime || 0);
+      setDuration(video.duration || 0);
     }, 250);
 
     return () => {
@@ -105,6 +124,32 @@ export function OverlayApp({
   const activeProgress = useMemo<StoredFrameProgressData>(() => {
     return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [] };
   }, [activeFrame.id, typingProgress]);
+
+  const isActiveFrameComplete = useMemo(() => {
+    const typeableCharCount = activeFrame.caption.filter((char) => char.isTypeable).length;
+
+    return typeableCharCount === 0 || activeProgress.finishedCharIds.length >= typeableCharCount;
+  }, [activeFrame.caption, activeProgress.finishedCharIds]);
+
+  useEffect(() => {
+    if (!activeCue || isActiveFrameComplete) {
+      loopRangeRef.current = null;
+      return;
+    }
+
+    const nextCue = subtitleCues.find((cue) => cue.start > activeCue.start);
+    const loopStart = activeCue.start;
+    const paddedEnd = activeCue.end + LOOP_END_PADDING_SECONDS;
+    const nextCueBoundary = nextCue
+      ? Math.max(activeCue.start, nextCue.start - NEXT_CUE_GUARD_SECONDS)
+      : Number.POSITIVE_INFINITY;
+    const loopEnd = Math.min(paddedEnd, nextCueBoundary);
+
+    loopRangeRef.current = {
+      start: loopStart,
+      end: loopEnd,
+    };
+  }, [activeCue, isActiveFrameComplete, subtitleCues]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
     setTypingProgress((state) => {
