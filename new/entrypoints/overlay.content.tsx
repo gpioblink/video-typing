@@ -4,8 +4,10 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import { OverlayApp } from '../src/components/OverlayApp';
 import {
+  loadStoredPlaybackPosition,
   loadStoredSubtitle,
   loadStoredTypingProgress,
+  saveStoredPlaybackPosition,
   saveStoredSubtitle,
 } from '../src/lib/storage';
 import { parseSubtitleFile } from '../src/lib/subtitles';
@@ -41,6 +43,7 @@ export default defineContentScript({
       return;
     }
 
+    const storedPlaybackPosition = await loadStoredPlaybackPosition(pageUrl);
     const storedSubtitle = await loadStoredSubtitle(pageUrl);
     const storedTypingProgress = await loadStoredTypingProgress(pageUrl);
     const subtitleFile = storedSubtitle || await requestSubtitleFile();
@@ -54,10 +57,16 @@ export default defineContentScript({
       await saveStoredSubtitle(pageUrl, subtitleFile);
     }
 
+    const previousTargetId = video.getAttribute(VIDEO_ATTR);
+    if (previousTargetId) {
+      await saveStoredPlaybackPosition(pageUrl, video.currentTime);
+    }
+
     window[OVERLAY_KEY]?.remove();
 
     const targetId = `video-typing-${Date.now()}`;
     video.setAttribute(VIDEO_ATTR, targetId);
+    await restorePlaybackPosition(video, storedPlaybackPosition?.currentTime);
 
     const ui = await createShadowRootUi(ctx, {
       name: 'video-typing-overlay',
@@ -118,6 +127,32 @@ async function requestSubtitleFile(): Promise<LoadedSubtitleFile | null> {
   } catch {
     return null;
   }
+}
+
+async function restorePlaybackPosition(video: HTMLVideoElement, currentTime?: number) {
+  if (currentTime == null || !Number.isFinite(currentTime)) {
+    return;
+  }
+
+  const apply = () => {
+    const duration = Number.isFinite(video.duration) ? video.duration : currentTime;
+    video.currentTime = Math.max(0, Math.min(currentTime, duration));
+  };
+
+  if (video.readyState >= 1) {
+    apply();
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const onLoadedMetadata = () => {
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      apply();
+      resolve();
+    };
+
+    video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+  });
 }
 
 function selectSubtitleFile(): Promise<File | null> {

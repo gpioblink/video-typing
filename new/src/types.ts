@@ -49,3 +49,7 @@ export interface StoredSubtitleData {
 export interface StoredTypingProgressData {
   [frameId: string]: ID[];
 }
+
+export interface StoredPlaybackPositionData {
+  currentTime: number;
+}

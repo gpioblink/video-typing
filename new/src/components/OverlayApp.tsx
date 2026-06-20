@@ -1,13 +1,17 @@
 import { CacheProvider } from '@emotion/react';
 import createCache from '@emotion/cache';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DebugPanel } from './DebugPanel';
 import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { mockWords } from '../data/mockData';
-import { saveStoredSubtitle, saveStoredTypingProgress } from '../lib/storage';
+import {
+  saveStoredPlaybackPosition,
+  saveStoredSubtitle,
+  saveStoredTypingProgress,
+} from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
 import type { StoredTypingProgressData, SubtitleCue } from '../types';
@@ -35,6 +39,7 @@ export function OverlayApp({
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const currentTimeRef = useRef(0);
 
   const cache = useMemo(() => {
     return createCache({
@@ -54,6 +59,23 @@ export function OverlayApp({
       window.clearInterval(timer);
     };
   }, [targetId]);
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  useEffect(() => {
+    const persistPlaybackPosition = () => {
+      void saveStoredPlaybackPosition(pageUrl, currentTimeRef.current);
+    };
+
+    window.addEventListener('pagehide', persistPlaybackPosition);
+
+    return () => {
+      window.removeEventListener('pagehide', persistPlaybackPosition);
+      persistPlaybackPosition();
+    };
+  }, [pageUrl]);
 
   const activeCue = useMemo(() => {
     return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;

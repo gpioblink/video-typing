@@ -2,6 +2,7 @@ import type {
   PanelKind,
   PanelPosition,
   StoredPanelPositions,
+  StoredPlaybackPositionData,
   StoredSubtitleData,
   StoredTypingProgressData,
 } from '../types';
@@ -9,6 +10,7 @@ import type {
 const STORAGE_KEY = 'videoTypingPrototypePanelPositions';
 const SUBTITLE_STORAGE_KEY = 'videoTypingPrototypeSubtitles';
 const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
+const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
 
 export async function loadPanelPosition(hostname: string, kind: PanelKind) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
@@ -66,6 +68,23 @@ export async function saveStoredTypingProgress(
         ...(progress[url] || {}),
         [frameId]: finishedCharIds,
       },
+    },
+  });
+}
+
+export async function loadStoredPlaybackPosition(url: string) {
+  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
+  return positions[url];
+}
+
+export async function saveStoredPlaybackPosition(url: string, currentTime: number) {
+  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
+  await chrome.storage.local.set({
+    [PLAYBACK_STORAGE_KEY]: {
+      ...positions,
+      [url]: { currentTime },
     },
   });
 }
