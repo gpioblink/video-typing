@@ -14,7 +14,7 @@ import {
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement } from '../lib/video';
-import type { StoredTypingProgressData, SubtitleCue } from '../types';
+import type { DictionaryWord, StoredTypingProgressData, SubtitleCue, TagContent } from '../types';
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -39,6 +39,9 @@ export function OverlayApp({
   const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [hintWords, setHintWords] = useState<DictionaryWord[]>(mockWords);
+  const [latestMistakeReason, setLatestMistakeReason] = useState<TagContent | null>(null);
+  const [latestMistakeQuery, setLatestMistakeQuery] = useState('');
   const currentTimeRef = useRef(0);
 
   const cache = useMemo(() => {
@@ -113,6 +116,22 @@ export function OverlayApp({
     });
   }, [activeFrame.id, pageUrl]);
 
+  const handleRequestExplanation = useCallback((query: string) => {
+    setLatestMistakeQuery(query);
+    setHintWords((state) => {
+      const nextWord = {
+        title: query,
+        content: 'Matched subtitle text. Dictionary lookup is not connected in the overlay yet.',
+      };
+      const filtered = state.filter((word) => word.title !== query);
+      return [nextWord, ...filtered].slice(0, 10);
+    });
+  }, []);
+
+  const handleMistake = useCallback((reason: TagContent) => {
+    setLatestMistakeReason(reason);
+  }, []);
+
   return (
     <CacheProvider value={cache}>
       <div style={overlayStyle}>
@@ -121,13 +140,17 @@ export function OverlayApp({
             frame={activeFrame}
             initialFinishedCharIds={activeFinishedCharIds}
             sendCompleted={() => {}}
-            requestExplanation={() => {}}
-            sendMistake={() => {}}
+            requestExplanation={handleRequestExplanation}
+            sendMistake={handleMistake}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
           />
         </DraggablePanel>
         <DraggablePanel kind="hint" title="Hint" defaultPosition={{ x: 700, y: 120 }}>
-          <Hint words={mockWords} />
+          <Hint
+            latestMistakeReason={latestMistakeReason}
+            latestQuery={latestMistakeQuery}
+            words={hintWords}
+          />
         </DraggablePanel>
         <DraggablePanel kind="debug" title="Debug" defaultPosition={{ x: 24, y: 24 }}>
           <DebugPanel

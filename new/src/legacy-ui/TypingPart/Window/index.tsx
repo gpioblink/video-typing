@@ -47,6 +47,41 @@ function charsToString(chars: Char[]) {
   return chars.map((char) => char.char).join('');
 }
 
+function createMistakeTag(
+  frame: CaptionFrame,
+  keyboardLog: Array<{ currentCharId: ID; isCorrect: boolean }>,
+  currentCharId: ID,
+) {
+  const charIndex = frame.caption.findIndex((char) => char.id === currentCharId);
+  if (charIndex === -1) return null;
+
+  const targetCharIds: string[] = [];
+  let wordHeadIndex = 0;
+
+  for (wordHeadIndex = charIndex; wordHeadIndex >= 0; wordHeadIndex -= 1) {
+    if (!frame.caption[wordHeadIndex].isTypeable) break;
+    targetCharIds.push(frame.caption[wordHeadIndex].id);
+  }
+
+  const targetLogs = keyboardLog.filter((log) => targetCharIds.includes(log.currentCharId));
+  const missCount = targetLogs.filter((log) => !log.isCorrect).length;
+
+  if (missCount === 0) return null;
+
+  const content: TagContent =
+    missCount <= 2 ? 'spelling' : targetLogs.some((log) => !log.isCorrect) ? 'ignorance' : 'others';
+
+  return {
+    content,
+    query: charsToString(frame.caption.slice(wordHeadIndex + 1)),
+    tag: {
+      id: crypto.randomUUID(),
+      pastedCharIds: targetCharIds,
+      content,
+    } satisfies Tag,
+  };
+}
+
 export function Window({
   frame,
   initialFinishedCharIds,
@@ -57,12 +92,25 @@ export function Window({
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
+  const gameRef = useRef(game);
+  const keyboardLogRef = useRef(keyboardLog);
   const keyboardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setGame(initializeGame(frame, initialFinishedCharIds));
+    const nextGame = initializeGame(frame, initialFinishedCharIds);
+    gameRef.current = nextGame;
+    setGame(nextGame);
+    keyboardLogRef.current = [];
     setKeyboardLog([]);
   }, [frame.id]);
+
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
+  useEffect(() => {
+    keyboardLogRef.current = keyboardLog;
+  }, [keyboardLog]);
 
   const finishedCharIds = useMemo(() => (
     game.gameChars
@@ -85,43 +133,6 @@ export function Window({
     return rows;
   }, [game.gameChars]);
 
-  const addTag = (tag: Tag) => {
-    setGame((state) => ({
-      ...state,
-      tags: [...state.tags, tag],
-    }));
-  };
-
-  const judgeTag = (currentCharId: ID) => {
-    const charIndex = frame.caption.findIndex((char) => char.id === currentCharId);
-    if (charIndex === -1) return;
-
-    const targetCharIds: string[] = [];
-    let wordHeadIndex = 0;
-
-    for (wordHeadIndex = charIndex; wordHeadIndex >= 0; wordHeadIndex -= 1) {
-      if (!frame.caption[wordHeadIndex].isTypeable) break;
-      targetCharIds.push(frame.caption[wordHeadIndex].id);
-    }
-
-    const targetLogs = keyboardLog.filter((log) => targetCharIds.includes(log.currentCharId));
-    const missCount = targetLogs.filter((log) => !log.isCorrect).length;
-
-    if (missCount === 0) return;
-
-    requestExplanation(charsToString(frame.caption.slice(wordHeadIndex + 1)));
-
-    const content: TagContent =
-      missCount <= 2 ? 'spelling' : targetLogs.some((log) => !log.isCorrect) ? 'ignorance' : 'others';
-
-    addTag({
-      id: crypto.randomUUID(),
-      pastedCharIds: targetCharIds,
-      content,
-    });
-    sendMistake(content);
-  };
-
   return (
     <Style
       tabIndex={0}
@@ -129,61 +140,71 @@ export function Window({
       onClick={() => keyboardRef.current?.focus()}
       onKeyDown={(event) => {
         event.stopPropagation();
+        const state = gameRef.current;
+        const nextChars = [...state.gameChars];
+        const inputIndex = nextChars.findIndex((char) => (
+          char.char.isTypeable && (char.status === 'available' || char.status === 'mistaken')
+        ));
 
-        setGame((state) => {
-          const nextChars = [...state.gameChars];
-          const inputIndex = nextChars.findIndex((char) => (
-            char.char.isTypeable && (char.status === 'available' || char.status === 'mistaken')
-          ));
+        if (inputIndex === -1) {
+          return;
+        }
 
-          if (inputIndex === -1) {
-            return state;
-          }
+        nextChars[inputIndex] = {
+          ...nextChars[inputIndex],
+          input: event.key,
+        };
 
+        const isCorrect = event.key.toLowerCase() === nextChars[inputIndex].char.char.toLowerCase();
+        const nextKeyboardLog = [
+          ...keyboardLogRef.current,
+          { currentCharId: nextChars[inputIndex].char.id, isCorrect },
+        ];
+        keyboardLogRef.current = nextKeyboardLog;
+        setKeyboardLog(nextKeyboardLog);
+
+        let nextTags = state.tags;
+
+        if (isCorrect) {
           nextChars[inputIndex] = {
             ...nextChars[inputIndex],
-            input: event.key,
+            status: 'finished',
           };
 
-          const isCorrect = event.key.toLowerCase() === nextChars[inputIndex].char.char.toLowerCase();
+          const nextWaitIndex = nextChars.findIndex((char) => char.char.isTypeable && char.status === 'wait');
 
-          setKeyboardLog((logs) => [
-            ...logs,
-            { currentCharId: nextChars[inputIndex].char.id, isCorrect },
-          ]);
+          if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
+            const mistake = createMistakeTag(frame, nextKeyboardLog, nextChars[inputIndex].char.id);
 
-          if (isCorrect) {
-            nextChars[inputIndex] = {
-              ...nextChars[inputIndex],
-              status: 'finished',
-            };
-
-            const nextWaitIndex = nextChars.findIndex((char) => char.char.isTypeable && char.status === 'wait');
-
-            if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
-              judgeTag(nextChars[inputIndex].char.id);
+            if (mistake) {
+              nextTags = [...state.tags, mistake.tag];
+              requestExplanation(mistake.query);
+              sendMistake(mistake.content);
             }
-
-            if (nextWaitIndex !== -1) {
-              nextChars[nextWaitIndex] = {
-                ...nextChars[nextWaitIndex],
-                status: 'available',
-              };
-            } else {
-              sendCompleted();
-            }
-          } else {
-            nextChars[inputIndex] = {
-              ...nextChars[inputIndex],
-              status: 'mistaken',
-            };
           }
 
-          return {
-            ...state,
-            gameChars: nextChars,
+          if (nextWaitIndex !== -1) {
+            nextChars[nextWaitIndex] = {
+              ...nextChars[nextWaitIndex],
+              status: 'available',
+            };
+          } else {
+            sendCompleted();
+          }
+        } else {
+          nextChars[inputIndex] = {
+            ...nextChars[inputIndex],
+            status: 'mistaken',
           };
-        });
+        }
+
+        const nextGame = {
+          ...state,
+          gameChars: nextChars,
+          tags: nextTags,
+        };
+        gameRef.current = nextGame;
+        setGame(nextGame);
       }}
     >
       {splitCharsByNewLine.map((chars, index) => (
