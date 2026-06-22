@@ -1,9 +1,13 @@
 import type { DictionaryEntry } from '../types';
 
-export async function searchExtensionDictionary(query: string): Promise<DictionaryEntry[]> {
+export async function searchExtensionDictionary(
+  query: string,
+  contextText = '',
+): Promise<DictionaryEntry[]> {
   const response = await chrome.runtime.sendMessage({
     type: 'videoTypingDictionarySearch',
     query,
+    contextText,
   });
 
   if (!response || !Array.isArray(response.entries)) {

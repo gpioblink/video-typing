@@ -43,6 +43,7 @@ export interface ChineseTypingJson {
 export interface DictionaryWord {
   title: string;
   content: string;
+  dictionaryEntryKey?: string;
 }
 
 export interface DictionaryEntry {

@@ -15,7 +15,7 @@ export default defineBackground(() => {
 
   chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: any) => {
     if (message?.type === 'videoTypingDictionarySearch') {
-      void searchDictionary(String(message.query || ''))
+      void searchDictionary(String(message.query || ''), 'english', String(message.contextText || ''))
         .then((entries) => sendResponse({ entries }))
         .catch(() => sendResponse({ entries: [] }));
 

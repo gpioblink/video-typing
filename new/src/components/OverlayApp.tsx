@@ -430,17 +430,18 @@ export function OverlayApp({
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
     const searchPromise = isChineseTypingMode
       ? searchExtensionChineseDictionary(displayQuery, activeCue?.text || '')
-      : searchExtensionDictionary(query);
+      : searchExtensionDictionary(query, activeCue?.text || '');
 
     void searchPromise.then((entries) => {
       if (entries.length === 0 && options?.silentIfMissing) {
         return;
       }
 
-      const nextWords = entries.length > 0
+      const nextWords: DictionaryWord[] = entries.length > 0
         ? entries.map((entry) => ({
           title: entry.headword,
           content: entry.body,
+          dictionaryEntryKey: entry.key,
         }))
         : [{
           title: displayQuery,
@@ -449,7 +450,13 @@ export function OverlayApp({
 
       setHintWords((state) => {
         const existingKeys = new Set(nextWords.map((word) => `${word.title}\u0000${word.content}`));
-        const filtered = state.filter((word) => !existingKeys.has(`${word.title}\u0000${word.content}`));
+        const existingEntryKeys = new Set(nextWords.flatMap((word) => (
+          word.dictionaryEntryKey ? [word.dictionaryEntryKey] : []
+        )));
+        const filtered = state.filter((word) => (
+          !existingKeys.has(`${word.title}\u0000${word.content}`) &&
+          !(word.dictionaryEntryKey && existingEntryKeys.has(word.dictionaryEntryKey))
+        ));
         return [...nextWords, ...filtered].slice(0, 10);
       });
     }).catch(() => {

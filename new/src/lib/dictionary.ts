@@ -9,6 +9,42 @@ const MAX_SEARCH_RESULTS = 10;
 const IMPORT_PROGRESS_INTERVAL = 1000;
 const IMPORT_BATCH_SIZE = 5000;
 const MAX_CHINESE_LOOKUP_LENGTH = 39;
+const ENGLISH_LOOKUP_TOKEN_PATTERN = /\$?\d+(?:[.,]\d+)?(?:st|nd|rd|th|%)?|[a-z]+(?:['-][a-z]+)*/gi;
+const ENGLISH_IRREGULAR_LEMMAS: Record<string, string> = {
+  am: 'be',
+  are: 'be',
+  been: 'be',
+  did: 'do',
+  does: 'do',
+  done: 'do',
+  gave: 'give',
+  given: 'give',
+  got: 'get',
+  gotten: 'get',
+  had: 'have',
+  has: 'have',
+  made: 'make',
+  makes: 'make',
+  saw: 'see',
+  seen: 'see',
+  took: 'take',
+  taken: 'take',
+  was: 'be',
+  were: 'be',
+  went: 'go',
+  gone: 'go',
+  worse: 'bad',
+  worst: 'bad',
+  better: 'good',
+  best: 'good',
+  children: 'child',
+  men: 'man',
+  women: 'woman',
+  people: 'person',
+  mice: 'mouse',
+  feet: 'foot',
+  teeth: 'tooth',
+};
 
 const DB_NAMES: Record<DictionaryKind, string> = {
   english: 'videoTypingDictionary',
@@ -134,11 +170,20 @@ export async function countDictionaryEntries(kind: DictionaryKind = 'english') {
 export async function searchDictionary(
   query: string,
   kind: DictionaryKind = 'english',
+  contextText = '',
 ): Promise<DictionaryEntry[]> {
   const normalizedQuery = normalizeDictionaryHeadword(query, kind);
 
   if (!normalizedQuery) {
     return [];
+  }
+
+  if (kind === 'english' && contextText.trim()) {
+    const contextMatches = await searchEnglishContextDictionary(normalizedQuery, contextText);
+
+    if (contextMatches.length > 0) {
+      return contextMatches;
+    }
   }
 
   const exactMatches = await getEntriesByNormalizedHeadword(normalizedQuery, kind);
@@ -186,6 +231,342 @@ export async function searchChineseDictionary(
   }
 
   return results;
+}
+
+async function searchEnglishContextDictionary(
+  normalizedQuery: string,
+  contextText: string,
+): Promise<DictionaryEntry[]> {
+  const candidateGroups = createEnglishLookupCandidateGroups(normalizedQuery, contextText);
+
+  for (const candidates of candidateGroups) {
+    const groupResults: DictionaryEntry[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const candidate of candidates) {
+      const entries = await getEntriesByNormalizedHeadword(candidate, 'english');
+
+      for (const entry of entries) {
+        if (seenKeys.has(entry.key)) {
+          continue;
+        }
+
+        seenKeys.add(entry.key);
+        groupResults.push(entry);
+
+        if (groupResults.length >= MAX_SEARCH_RESULTS) {
+          return groupResults;
+        }
+      }
+    }
+
+    if (groupResults.length > 0) {
+      return groupResults;
+    }
+  }
+
+  return [];
+}
+
+function createEnglishLookupCandidateGroups(query: string, contextText: string) {
+  const contextTokens = tokenizeEnglishLookupText(contextText);
+  const queryTokens = tokenizeEnglishLookupText(query);
+
+  if (contextTokens.length === 0) {
+    return [];
+  }
+
+  const groups: string[][] = [];
+
+  for (let length = contextTokens.length; length >= 1; length -= 1) {
+    const ngrams = createEnglishNgrams(contextTokens, length, queryTokens);
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+
+    for (const ngram of ngrams) {
+      for (const candidate of createEnglishPhraseCandidates(ngram)) {
+        const normalizedCandidate = normalizeDictionaryHeadword(candidate, 'english');
+
+        if (!normalizedCandidate || seen.has(normalizedCandidate)) {
+          continue;
+        }
+
+        seen.add(normalizedCandidate);
+        candidates.push(normalizedCandidate);
+      }
+    }
+
+    if (candidates.length > 0) {
+      groups.push(candidates);
+    }
+  }
+
+  return groups;
+}
+
+function tokenizeEnglishLookupText(text: string) {
+  const cleanedText = text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\[[^\]\r\n]*\]|\([^\)\r\n]*\)|【[^】\r\n]*】|（[^）\r\n]*）/g, ' ');
+  const tokens: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = ENGLISH_LOOKUP_TOKEN_PATTERN.exec(cleanedText)) !== null) {
+    tokens.push(match[0].replace(/,/g, '').toLowerCase());
+  }
+
+  return tokens;
+}
+
+function createEnglishNgrams(
+  tokens: string[],
+  length: number,
+  queryTokens: string[],
+) {
+  const preferred: string[][] = [];
+  const fallback: string[][] = [];
+
+  for (let start = 0; start + length <= tokens.length; start += 1) {
+    const ngram = tokens.slice(start, start + length);
+    const includesQuery = queryTokens.length > 0 && containsTokenSequence(ngram, queryTokens);
+
+    if (includesQuery) {
+      preferred.push(ngram);
+    } else {
+      fallback.push(ngram);
+    }
+  }
+
+  return preferred.length > 0 ? [...preferred, ...fallback] : fallback;
+}
+
+function containsTokenSequence(tokens: string[], sequence: string[]) {
+  if (sequence.length === 0 || sequence.length > tokens.length) {
+    return false;
+  }
+
+  for (let start = 0; start + sequence.length <= tokens.length; start += 1) {
+    const matches = sequence.every((token, index) => tokens[start + index] === token);
+
+    if (matches) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function createEnglishPhraseCandidates(tokens: string[]) {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const sourceTokenSets = [tokens, ...createEnglishLemmaTokenLists(tokens)];
+
+  for (const sourceTokens of sourceTokenSets) {
+    addEnglishPhraseCandidate(candidates, seen, sourceTokens);
+  }
+
+  for (const sourceTokens of sourceTokenSets) {
+    for (const placeholderTokens of createNumberPlaceholderTokenLists(sourceTokens)) {
+      addEnglishPhraseCandidate(candidates, seen, placeholderTokens);
+    }
+  }
+
+  for (const sourceTokens of sourceTokenSets) {
+    for (const placeholder of ['~', 'someone']) {
+      for (const placeholderTokens of createRangePlaceholderTokenLists(sourceTokens, placeholder)) {
+        addEnglishPhraseCandidate(candidates, seen, placeholderTokens);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function addEnglishPhraseCandidate(candidates: string[], seen: Set<string>, tokens: string[]) {
+  const candidate = tokens.join(' ').trim();
+
+  if (!candidate || seen.has(candidate)) {
+    return;
+  }
+
+  seen.add(candidate);
+  candidates.push(candidate);
+}
+
+function areTokenListsEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((token, index) => token === right[index]);
+}
+
+function getPreferredEnglishLemma(token: string) {
+  return createEnglishInflectionCandidates(token)[0] || token;
+}
+
+function createEnglishLemmaTokenLists(tokens: string[]) {
+  const candidates: string[][] = [];
+  const seen = new Set<string>();
+  const addTokens = (nextTokens: string[]) => {
+    if (areTokenListsEqual(tokens, nextTokens)) {
+      return;
+    }
+
+    const key = nextTokens.join('\u0000');
+
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    candidates.push(nextTokens);
+  };
+
+  tokens.forEach((token, index) => {
+    for (const lemma of createEnglishInflectionCandidates(token)) {
+      const nextTokens = [...tokens];
+      nextTokens[index] = lemma;
+      addTokens(nextTokens);
+    }
+  });
+
+  addTokens(tokens.map(getPreferredEnglishLemma));
+
+  return candidates;
+}
+
+function createEnglishInflectionCandidates(token: string) {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (candidate: string) => {
+    if (!candidate || candidate === token || seen.has(candidate)) {
+      return;
+    }
+
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+
+  addCandidate(ENGLISH_IRREGULAR_LEMMAS[token]);
+
+  if (!/^[a-z][a-z'-]*$/.test(token) || token.length <= 3) {
+    return candidates;
+  }
+
+  if (token.endsWith('iest') && token.length > 5) {
+    addCandidate(`${token.slice(0, -4)}y`);
+  } else if (token.endsWith('ier') && token.length > 4) {
+    addCandidate(`${token.slice(0, -3)}y`);
+  } else if (token.endsWith('est') && token.length > 5) {
+    addCandidate(token.slice(0, -3));
+    addCandidate(`${token.slice(0, -3)}e`);
+  } else if (token.endsWith('er') && token.length > 4) {
+    addCandidate(token.slice(0, -2));
+    addCandidate(`${token.slice(0, -2)}e`);
+  }
+
+  if (token.endsWith('ies') && token.length > 4) {
+    addCandidate(`${token.slice(0, -3)}y`);
+  } else if (/[cs]hes$|xes$|zes$|oes$|sses$/.test(token)) {
+    addCandidate(token.slice(0, -2));
+  } else if (token.length > 4 && token.endsWith('s') && !token.endsWith('ss')) {
+    addCandidate(token.slice(0, -1));
+  }
+
+  if (token.endsWith('ied') && token.length > 4) {
+    addCandidate(`${token.slice(0, -3)}y`);
+  } else if (token.endsWith('ed') && token.length > 4) {
+    const stem = token.slice(0, -2);
+    addCandidate(stem);
+    addCandidate(`${stem}e`);
+    addCandidate(removeDoubledFinalConsonant(stem));
+  }
+
+  if (token.endsWith('ing') && token.length > 5) {
+    const stem = token.slice(0, -3);
+    addCandidate(stem);
+    addCandidate(`${stem}e`);
+    addCandidate(removeDoubledFinalConsonant(stem));
+  }
+
+  return candidates;
+}
+
+function removeDoubledFinalConsonant(value: string) {
+  if (value.length < 2) {
+    return value;
+  }
+
+  const last = value[value.length - 1];
+  const previous = value[value.length - 2];
+
+  if (last === previous && /[bcdfghjklmnpqrstvwxyz]/.test(last)) {
+    return value.slice(0, -1);
+  }
+
+  return value;
+}
+
+function createNumberPlaceholderTokenLists(tokens: string[]) {
+  const placeholderTokens = tokens.map((token) => getNumberPlaceholderToken(token) || token);
+
+  if (areTokenListsEqual(tokens, placeholderTokens)) {
+    return [];
+  }
+
+  const candidates = [placeholderTokens];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const placeholder = getNumberPlaceholderToken(tokens[index]);
+
+    if (!placeholder) {
+      continue;
+    }
+
+    const nextTokens = [...tokens];
+    nextTokens[index] = placeholder;
+    candidates.push(nextTokens);
+  }
+
+  return candidates;
+}
+
+function getNumberPlaceholderToken(token: string) {
+  if (/^\$\d/.test(token)) {
+    return '$__';
+  }
+
+  if (/^\d/.test(token) && token.endsWith('%')) {
+    return '__%';
+  }
+
+  if (/^\d+(st|nd|rd|th)$/.test(token)) {
+    return '__th';
+  }
+
+  if (/^\d/.test(token)) {
+    return '__';
+  }
+
+  return null;
+}
+
+function createRangePlaceholderTokenLists(tokens: string[], placeholder: string) {
+  if (tokens.length < 2) {
+    return [];
+  }
+
+  const candidates: string[][] = [];
+
+  for (let start = 1; start < tokens.length; start += 1) {
+    for (let end = start; end < tokens.length; end += 1) {
+      candidates.push([
+        ...tokens.slice(0, start),
+        placeholder,
+        ...tokens.slice(end + 1),
+      ]);
+    }
+  }
+
+  return candidates;
 }
 
 function createDictionaryEntryKey(normalizedHeadword: string, body: string) {
