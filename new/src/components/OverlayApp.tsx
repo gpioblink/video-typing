@@ -63,6 +63,7 @@ export function OverlayApp({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
+  const [englishHintQueryHistory, setEnglishHintQueryHistory] = useState<string[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
   const currentTimeRef = useRef(0);
@@ -426,6 +427,16 @@ export function OverlayApp({
   ) => {
     const isChineseTypingMode = Boolean(typingFrames?.length);
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
+    const rememberEnglishQuery = () => {
+      if (isChineseTypingMode) {
+        return;
+      }
+
+      setEnglishHintQueryHistory((state) => {
+        const filtered = state.filter((item) => item !== query);
+        return [query, ...filtered].slice(0, 10);
+      });
+    };
     const searchPromise = isChineseTypingMode
       ? searchExtensionChineseDictionary(displayQuery, activeCue?.text || '')
       : searchExtensionDictionary(query, activeCue?.text || '');
@@ -434,6 +445,8 @@ export function OverlayApp({
       if (entries.length === 0 && options?.silentIfMissing) {
         return;
       }
+
+      rememberEnglishQuery();
 
       const nextWords: DictionaryWord[] = entries.length > 0
         ? entries.map((entry) => ({
@@ -461,6 +474,8 @@ export function OverlayApp({
       if (options?.silentIfMissing) {
         return;
       }
+
+      rememberEnglishQuery();
 
       setHintWords((state) => {
         const nextWord = {
@@ -515,6 +530,7 @@ export function OverlayApp({
               targetId={targetId}
               currentTime={currentTime}
               duration={duration}
+              englishHintQueryHistory={englishHintQueryHistory}
             />
           </DraggablePanel>
         ) : null}

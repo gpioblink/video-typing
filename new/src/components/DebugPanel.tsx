@@ -5,12 +5,14 @@ interface Props {
   targetId: string;
   currentTime: number;
   duration: number;
+  englishHintQueryHistory: string[];
 }
 
 export function DebugPanel({
   targetId,
   currentTime,
   duration,
+  englishHintQueryHistory,
 }: Props) {
   const [seekText, setSeekText] = useState('0');
   const video = getVideoElement(targetId);
@@ -36,6 +38,18 @@ export function DebugPanel({
       <div style={{ fontSize: 12, opacity: 0.9 }}>
         {currentTime.toFixed(1)} / {duration.toFixed(1)}
       </div>
+      {englishHintQueryHistory.length > 0 ? (
+        <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+          <div style={{ fontWeight: 600 }}>English hint queries</div>
+          <div style={historyListStyle}>
+            {englishHintQueryHistory.map((query) => (
+              <div key={query} style={historyItemStyle}>
+                {query}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -43,4 +57,16 @@ export function DebugPanel({
 const rowStyle: React.CSSProperties = {
   display: 'flex',
   gap: 8,
+};
+
+const historyListStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  maxHeight: 120,
+  overflowY: 'auto',
+};
+
+const historyItemStyle: React.CSSProperties = {
+  overflowWrap: 'anywhere',
+  opacity: 0.85,
 };
