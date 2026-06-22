@@ -12,13 +12,21 @@ interface Props {
   title: string;
   defaultPosition: PanelPosition;
   defaultSize: PanelSize;
+  titleBackground?: string;
   children: React.ReactNode;
 }
 
 const MIN_PANEL_WIDTH = 240;
 const MIN_PANEL_HEIGHT = 160;
 
-export function DraggablePanel({ kind, title, defaultPosition, defaultSize, children }: Props) {
+export function DraggablePanel({
+  kind,
+  title,
+  defaultPosition,
+  defaultSize,
+  titleBackground = '#162229',
+  children,
+}: Props) {
   const hostname = window.location.hostname;
   const [position, setPosition] = useState(defaultPosition);
   const [size, setSize] = useState(defaultSize);
@@ -187,7 +195,7 @@ export function DraggablePanel({ kind, title, defaultPosition, defaultSize, chil
           fontWeight: 700,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
-          background: '#162229',
+          background: titleBackground,
           userSelect: 'none',
         }}
       >

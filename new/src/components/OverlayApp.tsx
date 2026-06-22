@@ -209,6 +209,14 @@ export function OverlayApp({
     return displaySubtitleCues.find((cue) => cue.start <= cueTime && cueTime < cue.end) || activeCue;
   }, [activeCue, displaySubtitleCues]);
 
+  const isTypingCueActive = useMemo(() => {
+    if (!activeCue) {
+      return false;
+    }
+
+    return activeCue.start <= currentTime && currentTime < activeCue.end;
+  }, [activeCue, currentTime]);
+
   const activeTypingFrame = useMemo(() => {
     if (!activeCue || !typingFrames?.length) {
       return null;
@@ -468,6 +476,7 @@ export function OverlayApp({
           title="Typing"
           defaultPosition={{ x: 24, y: 220 }}
           defaultSize={{ width: 760, height: 260 }}
+          titleBackground={isTypingCueActive ? '#1f7a3a' : '#162229'}
         >
           <Window
             frame={activeFrame}
