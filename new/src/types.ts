@@ -83,6 +83,14 @@ export interface StoredSubtitleData {
   fileName: string;
   cues: SubtitleCue[];
   typingFrames?: TimedCaptionFrame[];
+  displaySubtitleFileName?: string;
+  displaySubtitleCues?: SubtitleCue[];
+  netflix?: {
+    englishSubtitleTrackId: string;
+    nativeSubtitleTrackId?: string;
+    englishAudioTrackId: string;
+    nativeAudioTrackId?: string;
+  };
 }
 
 export interface StoredFrameProgressData {

@@ -12,6 +12,15 @@ import {
   saveStoredSubtitle,
 } from '../src/lib/storage';
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../src/lib/chineseTyping';
+import {
+  fetchNetflixSubtitle,
+  getNetflixTrackList,
+  isNetflixHostname,
+  replayNetflixNativeAudio,
+  setNetflixAudioTrack,
+  type NetflixTrackListResponse,
+  type NetflixTrackOption,
+} from '../src/lib/netflixSeek';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import { seekVideo } from '../src/lib/video';
@@ -26,6 +35,9 @@ interface LoadedSubtitleFile {
   cues: StoredSubtitleData['cues'];
   fileName: string;
   typingFrames?: StoredSubtitleData['typingFrames'];
+  displaySubtitleFileName?: StoredSubtitleData['displaySubtitleFileName'];
+  displaySubtitleCues?: StoredSubtitleData['displaySubtitleCues'];
+  netflix?: StoredSubtitleData['netflix'];
 }
 
 declare global {
@@ -42,6 +54,7 @@ export default defineContentScript({
   async main(ctx: any) {
     const video = document.querySelector('video');
     const pageUrl = window.location.href;
+    const isNetflixPage = isNetflixHostname(window.location.hostname);
 
     if (!video) {
       showToast('No video tag found on this page.');
@@ -51,7 +64,7 @@ export default defineContentScript({
     const storedPlaybackPosition = await loadStoredPlaybackPosition(pageUrl);
     const storedSubtitle = await loadStoredSubtitle(pageUrl);
     const storedTypingProgress = await loadStoredTypingProgress(pageUrl);
-    const subtitleFile = storedSubtitle || await requestSubtitleFile();
+    const subtitleFile = storedSubtitle || await requestSubtitleFile({ allowNetflixAuto: isNetflixPage });
 
     if (!subtitleFile) {
       showToast('Subtitle file is required. Overlay was not started.');
@@ -76,6 +89,9 @@ export default defineContentScript({
 
     const targetId = `video-typing-${Date.now()}`;
     video.setAttribute(VIDEO_ATTR, targetId);
+    if (subtitleFile.netflix?.englishAudioTrackId) {
+      void setNetflixAudioTrack(subtitleFile.netflix.englishAudioTrackId).catch(() => undefined);
+    }
     await restorePlaybackPosition(
       video,
       targetId,
@@ -98,6 +114,14 @@ export default defineContentScript({
             initialSubtitleFileName={subtitleFile.fileName}
             initialTypingFrames={subtitleFile.typingFrames}
             initialTypingProgress={storedTypingProgress}
+            displaySubtitleCues={subtitleFile.displaySubtitleCues}
+            displaySubtitleFileName={subtitleFile.displaySubtitleFileName}
+            onFrameMistake={(cue, mistakeCount) => {
+              if (mistakeCount > 0 && mistakeCount % 5 === 0) {
+                void replayNetflixNativeCue(subtitleFile, cue);
+              }
+            }}
+            onFrameCompleted={(cue) => replayNetflixNativeCue(subtitleFile, cue)}
             pageUrl={pageUrl}
             shadowRoot={container.getRootNode() as ShadowRoot}
             targetId={targetId}
@@ -130,12 +154,18 @@ export default defineContentScript({
   },
 });
 
-async function requestSubtitleFile(): Promise<LoadedSubtitleFile | null> {
-  const file = await selectSubtitleFile();
+async function requestSubtitleFile(options?: { allowNetflixAuto?: boolean }): Promise<LoadedSubtitleFile | null> {
+  const selection = await selectSubtitleSource(options);
 
-  if (!file) {
+  if (!selection) {
     return null;
   }
+
+  if (selection === 'netflix-auto') {
+    return requestNetflixAutoSubtitleFile();
+  }
+
+  const file = selection;
 
   try {
     const text = await file.text();
@@ -156,6 +186,59 @@ async function requestSubtitleFile(): Promise<LoadedSubtitleFile | null> {
     };
   } catch {
     return null;
+  }
+}
+
+async function requestNetflixAutoSubtitleFile(): Promise<LoadedSubtitleFile | null> {
+  let progressPanel = createSubtitleImportProgressPanel();
+
+  try {
+    progressPanel.setMessage('Loading Netflix subtitle and audio tracks...');
+    const tracks = await getNetflixTrackList();
+    progressPanel.remove();
+    const selectedTracks = await selectNetflixTracks(tracks);
+
+    if (!selectedTracks) {
+      return null;
+    }
+
+    progressPanel = createSubtitleImportProgressPanel();
+    progressPanel.setMessage('Downloading English subtitle...');
+    const englishSubtitle = await fetchNetflixSubtitle(selectedTracks.englishSubtitleTrackId);
+    const englishCues = parseSubtitleFile(englishSubtitle.fileName, englishSubtitle.text);
+
+    if (englishCues.length === 0) {
+      return null;
+    }
+
+    let nativeSubtitleFileName: string | undefined;
+    let nativeSubtitleCues: StoredSubtitleData['displaySubtitleCues'];
+
+    if (selectedTracks.nativeSubtitleTrackId) {
+      progressPanel.setMessage('Downloading native subtitle...');
+      const nativeSubtitle = await fetchNetflixSubtitle(selectedTracks.nativeSubtitleTrackId);
+      const parsedNativeCues = parseSubtitleFile(nativeSubtitle.fileName, nativeSubtitle.text);
+
+      if (parsedNativeCues.length > 0) {
+        nativeSubtitleFileName = nativeSubtitle.fileName;
+        nativeSubtitleCues = parsedNativeCues;
+      }
+    }
+
+    progressPanel.setMessage('Netflix tracks loaded.');
+    return {
+      cues: englishCues,
+      fileName: englishSubtitle.fileName,
+      displaySubtitleFileName: nativeSubtitleFileName,
+      displaySubtitleCues: nativeSubtitleCues,
+      netflix: selectedTracks,
+    };
+  } catch (error) {
+    console.warn('[video-typing] Netflix auto subtitle setup failed.', error);
+    showToast('Netflix auto setup failed. Choose a subtitle file instead.');
+    return null;
+  } finally {
+    progressPanel.remove();
   }
 }
 
@@ -257,17 +340,46 @@ function getResumePlaybackPosition(
   return latestStartByUpdate ?? latestStartByOrder ?? undefined;
 }
 
-function selectSubtitleFile(options?: {
+function replayNetflixNativeCue(subtitleFile: LoadedSubtitleFile, cue: StoredSubtitleData['cues'][number]) {
+  const englishAudioTrackId = subtitleFile.netflix?.englishAudioTrackId;
+  const nativeAudioTrackId = subtitleFile.netflix?.nativeAudioTrackId;
+
+  if (!englishAudioTrackId || !nativeAudioTrackId) {
+    return Promise.resolve();
+  }
+
+  return replayNetflixNativeAudio(
+    englishAudioTrackId,
+    nativeAudioTrackId,
+    cue.start,
+    cue.end,
+  ).catch(() => undefined);
+}
+
+async function selectSubtitleFile(options?: {
   title?: string;
   description?: string;
   accept?: string;
-}): Promise<File | null> {
+}) {
+  const selection = await selectSubtitleSource(options);
+  return selection instanceof File ? selection : null;
+}
+
+type SubtitleSourceSelection = File | 'netflix-auto' | null;
+
+function selectSubtitleSource(options?: {
+  title?: string;
+  description?: string;
+  accept?: string;
+  allowNetflixAuto?: boolean;
+}): Promise<SubtitleSourceSelection> {
   return new Promise((resolve) => {
     const panel = document.createElement('div');
     const title = document.createElement('div');
     const description = document.createElement('div');
     const actions = document.createElement('div');
     const chooseButton = document.createElement('button');
+    const netflixAutoButton = document.createElement('button');
     const cancelButton = document.createElement('button');
     const input = document.createElement('input');
     let settled = false;
@@ -286,6 +398,15 @@ function selectSubtitleFile(options?: {
 
       cleanup();
       resolve(file);
+    };
+
+    const finishWithNetflixAuto = () => {
+      if (settled) {
+        return;
+      }
+
+      cleanup();
+      resolve('netflix-auto');
     };
 
     const handleWindowFocus = () => {
@@ -307,8 +428,10 @@ function selectSubtitleFile(options?: {
     title.textContent = options?.title || 'Subtitle file required';
     description.textContent = options?.description || 'Click "Choose file" below to open the subtitle picker and start video-typing.';
     chooseButton.textContent = 'Choose file';
+    netflixAutoButton.textContent = 'Auto fetch';
     cancelButton.textContent = 'Cancel';
     cancelButton.addEventListener('click', () => finish(null));
+    netflixAutoButton.addEventListener('click', finishWithNetflixAuto);
     chooseButton.addEventListener('click', () => {
       waitingForPicker = true;
       window.addEventListener('focus', handleWindowFocus, { once: true });
@@ -354,6 +477,17 @@ function selectSubtitleFile(options?: {
       fontSize: '12px',
       fontWeight: '700',
     });
+    Object.assign(netflixAutoButton.style, {
+      display: options?.allowNetflixAuto ? 'inline-flex' : 'none',
+      cursor: 'pointer',
+      padding: '7px 10px',
+      border: 'none',
+      borderRadius: '8px',
+      background: '#46d369',
+      color: '#102016',
+      fontSize: '12px',
+      fontWeight: '700',
+    });
     Object.assign(cancelButton.style, {
       cursor: 'pointer',
       padding: '7px 10px',
@@ -364,10 +498,199 @@ function selectSubtitleFile(options?: {
       fontSize: '12px',
     });
 
-    actions.append(chooseButton, cancelButton);
+    actions.append(chooseButton, netflixAutoButton, cancelButton);
     panel.append(title, description, actions, input);
     document.body.append(panel);
   });
+}
+
+function selectNetflixTracks(tracks: NetflixTrackListResponse) {
+  return new Promise<NonNullable<StoredSubtitleData['netflix']> | null>((resolve) => {
+    const panel = document.createElement('div');
+    const title = document.createElement('div');
+    const description = document.createElement('div');
+    const form = document.createElement('div');
+    const englishSubtitleSelect = createTrackSelect(tracks.subtitles, false);
+    const nativeSubtitleSelect = createTrackSelect(tracks.subtitles, true);
+    const englishAudioSelect = createTrackSelect(tracks.audios, false);
+    const nativeAudioSelect = createTrackSelect(tracks.audios, true);
+    const actions = document.createElement('div');
+    const startButton = document.createElement('button');
+    const cancelButton = document.createElement('button');
+
+    const englishSubtitleDefault = findPreferredTrack(tracks.subtitles, 'english') || tracks.subtitles[0];
+    const englishAudioDefault = findPreferredTrack(tracks.audios, 'english') || tracks.audios[0];
+
+    if (englishSubtitleDefault) {
+      englishSubtitleSelect.value = englishSubtitleDefault.id;
+    }
+
+    if (englishAudioDefault) {
+      englishAudioSelect.value = englishAudioDefault.id;
+    }
+
+    const cleanup = () => {
+      panel.remove();
+    };
+
+    const finish = (value: NonNullable<StoredSubtitleData['netflix']> | null) => {
+      cleanup();
+      resolve(value);
+    };
+
+    title.textContent = 'Netflix auto setup';
+    description.textContent = 'Choose the Netflix subtitle and audio tracks to use with video-typing.';
+    startButton.textContent = 'Start';
+    cancelButton.textContent = 'Cancel';
+    startButton.disabled = !englishSubtitleSelect.value || !englishAudioSelect.value;
+    startButton.addEventListener('click', () => {
+      if (!englishSubtitleSelect.value || !englishAudioSelect.value) {
+        return;
+      }
+
+      finish({
+        englishSubtitleTrackId: englishSubtitleSelect.value,
+        nativeSubtitleTrackId: nativeSubtitleSelect.value || undefined,
+        englishAudioTrackId: englishAudioSelect.value,
+        nativeAudioTrackId: nativeAudioSelect.value || undefined,
+      });
+    });
+    cancelButton.addEventListener('click', () => finish(null));
+
+    form.append(
+      createSelectRow('English subtitle', englishSubtitleSelect),
+      createSelectRow('Native subtitle (optional)', nativeSubtitleSelect),
+      createSelectRow('English audio', englishAudioSelect),
+      createSelectRow('Native audio (optional)', nativeAudioSelect),
+    );
+    actions.append(startButton, cancelButton);
+    panel.append(title, description, form, actions);
+
+    Object.assign(panel.style, {
+      position: 'fixed',
+      top: '16px',
+      right: '16px',
+      zIndex: '2147483647',
+      width: '360px',
+      padding: '14px',
+      borderRadius: '10px',
+      background: 'rgba(30, 36, 45, 0.98)',
+      color: '#fff',
+      fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+    });
+    Object.assign(title.style, {
+      fontSize: '14px',
+      fontWeight: '700',
+      marginBottom: '6px',
+    });
+    Object.assign(description.style, {
+      fontSize: '12px',
+      lineHeight: '1.45',
+      marginBottom: '12px',
+      opacity: '0.85',
+    });
+    Object.assign(form.style, {
+      display: 'grid',
+      gap: '10px',
+      marginBottom: '12px',
+    });
+    Object.assign(actions.style, {
+      display: 'flex',
+      gap: '8px',
+    });
+    Object.assign(startButton.style, {
+      cursor: 'pointer',
+      padding: '7px 10px',
+      border: 'none',
+      borderRadius: '8px',
+      background: '#ffffff',
+      color: '#1e242d',
+      fontSize: '12px',
+      fontWeight: '700',
+    });
+    Object.assign(cancelButton.style, {
+      cursor: 'pointer',
+      padding: '7px 10px',
+      border: '1px solid rgba(255,255,255,0.35)',
+      borderRadius: '8px',
+      background: 'transparent',
+      color: '#ffffff',
+      fontSize: '12px',
+    });
+
+    document.body.append(panel);
+  });
+}
+
+function createTrackSelect(tracks: NetflixTrackOption[], optional: boolean) {
+  const select = document.createElement('select');
+
+  if (optional) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'None';
+    select.append(option);
+  }
+
+  for (const track of tracks) {
+    const option = document.createElement('option');
+    option.value = track.id;
+    option.textContent = formatTrackLabel(track);
+    select.append(option);
+  }
+
+  Object.assign(select.style, {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '7px 8px',
+    borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.25)',
+    background: '#162229',
+    color: '#ffffff',
+    fontSize: '12px',
+  });
+
+  return select;
+}
+
+function createSelectRow(labelText: string, select: HTMLSelectElement) {
+  const label = document.createElement('label');
+  const text = document.createElement('span');
+
+  text.textContent = labelText;
+  Object.assign(text.style, {
+    display: 'block',
+    fontSize: '12px',
+    fontWeight: '700',
+    marginBottom: '4px',
+  });
+  label.append(text, select);
+  return label;
+}
+
+function findPreferredTrack(tracks: NetflixTrackOption[], language: string) {
+  const normalizedLanguage = language.toLowerCase();
+  return tracks.find((track) => (
+    normalizeTrackText(track.bcp47).startsWith(normalizedLanguage.slice(0, 2)) ||
+    normalizeTrackText(track.language).startsWith(normalizedLanguage.slice(0, 2)) ||
+    normalizeTrackText(track.displayName).includes(normalizedLanguage)
+  ));
+}
+
+function formatTrackLabel(track: NetflixTrackOption) {
+  const parts = [
+    track.displayName,
+    track.bcp47 || track.language,
+    track.trackType,
+    track.isClosedCaptions ? 'CC' : '',
+    track.isForcedNarrative ? 'Forced' : '',
+  ].filter(Boolean);
+  return parts.join(' / ');
+}
+
+function normalizeTrackText(value: string | undefined) {
+  return (value || '').trim().toLowerCase();
 }
 
 function createSubtitleImportProgressPanel() {

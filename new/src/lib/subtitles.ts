@@ -75,7 +75,7 @@ function parseSrt(text: string): SubtitleCue[] {
     const [startText, endText] = lines[timingIndex].split('-->').map((value) => value.trim());
     const start = parseSubtitleTime(startText);
     const end = parseSubtitleTime(endText);
-    const body = lines.slice(timingIndex + 1).join('\n').trim();
+    const body = sanitizeSubtitleText(lines.slice(timingIndex + 1).join('\n')).trim();
 
     if (!Number.isFinite(start) || !Number.isFinite(end) || !body) {
       return [];
@@ -116,7 +116,7 @@ function parseVtt(text: string): SubtitleCue[] {
     const endText = endTextWithSettings.split(/\s+/)[0] || '';
     const start = parseSubtitleTime(startText);
     const end = parseSubtitleTime(endText);
-    const body = lines.slice(timingIndex + 1).join('\n').trim();
+    const body = sanitizeSubtitleText(lines.slice(timingIndex + 1).join('\n')).trim();
 
     if (!Number.isFinite(start) || !Number.isFinite(end) || !body) {
       return [];
@@ -130,13 +130,14 @@ function parseTtml(text: string): SubtitleCue[] {
   const parser = new DOMParser();
   const xml = parser.parseFromString(text, 'application/xml');
   const nodes = Array.from(xml.getElementsByTagName('p'));
+  const tickRate = getTtmlTickRate(xml);
 
   return nodes.flatMap((node) => {
     const startText = node.getAttribute('begin') || '';
     const endText = node.getAttribute('end') || '';
-    const start = parseSubtitleTime(startText);
-    const end = parseSubtitleTime(endText);
-    const body = extractTtmlText(node).trim();
+    const start = parseSubtitleTime(startText, tickRate);
+    const end = parseSubtitleTime(endText, tickRate);
+    const body = sanitizeSubtitleText(extractTtmlText(node)).trim();
 
     if (!Number.isFinite(start) || !Number.isFinite(end) || !body) {
       return [];
@@ -172,11 +173,24 @@ function extractTtmlText(node: Element) {
   return lines.join('').replace(/\n{3,}/g, '\n\n');
 }
 
-function parseSubtitleTime(input: string) {
+function getTtmlTickRate(xml: Document) {
+  const value = xml.documentElement?.getAttribute('ttp:tickRate')
+    || xml.documentElement?.getAttribute('tickRate')
+    || '';
+  const tickRate = Number(value);
+  return Number.isFinite(tickRate) && tickRate > 0 ? tickRate : 10_000_000;
+}
+
+function parseSubtitleTime(input: string, tickRate?: number) {
   const value = input.trim();
 
   if (!value) {
     return Number.NaN;
+  }
+
+  if (value.endsWith('t')) {
+    const ticks = Number(value.slice(0, -1));
+    return Number.isFinite(ticks) && tickRate ? ticks / tickRate : Number.NaN;
   }
 
   if (value.endsWith('s')) {
@@ -197,6 +211,17 @@ function parseSubtitleTime(input: string) {
   }
 
   return Number(normalized);
+}
+
+function sanitizeSubtitleText(text: string) {
+  const withoutTags = text
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\n{3,}/g, '\n\n');
+
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = withoutTags;
+  return textarea.value;
 }
 
 function textToCaptionChars(text: string): Char[] {
