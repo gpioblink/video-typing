@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Style } from './style';
 import { Line } from '../Line';
+import { isNetflixHostname } from '../../../lib/netflixSeek';
 import type { CaptionFrame, Char, ChineseTypingWord, ID, Tag, TagContent } from '../../../types';
 
 export type TypingStatus = 'wait' | 'available' | 'mistaken' | 'finished';
@@ -222,6 +223,7 @@ export function Window({
   const keyboardRef = useRef<HTMLDivElement>(null);
   const hintedWordKeysRef = useRef<Set<string>>(new Set());
   const [columnsPerLine, setColumnsPerLine] = useState(DEFAULT_COLUMNS_PER_LINE);
+  const isNetflixPage = useMemo(() => isNetflixHostname(window.location.hostname), []);
 
   useEffect(() => {
     const nextGame = initializeGame(frame, initialFinishedCharIds);
@@ -360,11 +362,56 @@ export function Window({
     });
   };
 
+  const restoreFocusIfNetflixTakesIt = (event: React.FocusEvent<HTMLDivElement>) => {
+    if (!isNetflixPage) {
+      return;
+    }
+
+    const nextFocusedElement = event.relatedTarget;
+
+    if (nextFocusedElement instanceof Node && event.currentTarget.contains(nextFocusedElement)) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      const keyboardElement = keyboardRef.current;
+
+      if (!keyboardElement) {
+        return;
+      }
+
+      const rootNode = keyboardElement.getRootNode();
+      const activeElement = rootNode instanceof ShadowRoot
+        ? rootNode.activeElement
+        : document.activeElement;
+
+      if (activeElement instanceof Node && keyboardElement.contains(activeElement)) {
+        return;
+      }
+
+      if (rootNode instanceof ShadowRoot && activeElement) {
+        return;
+      }
+
+      if (
+        !(rootNode instanceof ShadowRoot) &&
+        activeElement &&
+        activeElement !== document.body &&
+        activeElement !== document.documentElement
+      ) {
+        return;
+      }
+
+      keyboardElement.focus();
+    }, 0);
+  };
+
   return (
     <Style
       tabIndex={0}
       ref={keyboardRef}
       onClick={() => keyboardRef.current?.focus()}
+      onBlur={restoreFocusIfNetflixTakesIt}
       onKeyUp={stopKeyboardEventPropagation}
       onKeyPress={stopKeyboardEventPropagation}
       onKeyDown={(event) => {
