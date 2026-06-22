@@ -16,8 +16,9 @@ interface Props {
   initialFinishedCharIds: ID[];
   sendCompleted: () => void;
   requestExplanation: (query: string, options?: ExplanationRequestOptions) => void;
-  sendMistake: (reason: TagContent) => void;
   onMistakeInput?: () => void;
+  onMistakeReasonPromptOpen?: () => void;
+  onMistakeReasonPromptClose?: () => void;
   onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
@@ -44,6 +45,21 @@ const AUTO_HINT_EXCLUDED_WORDS = new Set([
 const DEFAULT_COLUMNS_PER_LINE = 50;
 const CHAR_CELL_WIDTH = 12;
 const WINDOW_HORIZONTAL_PADDING = 24;
+const MISTAKE_REASON_KEYS: Record<string, TagContent> = {
+  j: 'ignorance',
+  k: 'unaudible',
+  l: 'spelling',
+};
+
+interface WordInfo {
+  targetCharIds: ID[];
+  query: string;
+}
+
+interface PendingMistake extends WordInfo {
+  sourceText?: string;
+  shouldCompleteAfterSelection: boolean;
+}
 
 function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
   const finishedCharIds = new Set(initialFinishedCharIds);
@@ -72,7 +88,7 @@ function charsToString(chars: Char[]) {
   return chars.map((char) => char.char).join('');
 }
 
-function getWordInfo(frame: CaptionFrame, currentCharId: ID) {
+function getWordInfo(frame: CaptionFrame, currentCharId: ID): WordInfo | null {
   const charIndex = frame.caption.findIndex((char) => char.id === currentCharId);
 
   if (charIndex === -1 || !frame.caption[charIndex]?.isTypeable) {
@@ -159,31 +175,26 @@ function splitGameCharsIntoRows(gameChars: GameChar[], columnsPerLine: number) {
   return rows;
 }
 
-function createMistakeTag(
-  frame: CaptionFrame,
+function hasMistakeInWord(
   keyboardLog: Array<{ currentCharId: ID; isCorrect: boolean }>,
-  currentCharId: ID,
+  targetCharIds: ID[],
 ) {
-  const wordInfo = getWordInfo(frame, currentCharId);
-  if (!wordInfo) return null;
+  return keyboardLog.some((log) => !log.isCorrect && targetCharIds.includes(log.currentCharId));
+}
 
-  const targetLogs = keyboardLog.filter((log) => wordInfo.targetCharIds.includes(log.currentCharId));
-  const missCount = targetLogs.filter((log) => !log.isCorrect).length;
-
-  if (missCount === 0) return null;
-
-  const content: TagContent =
-    missCount <= 2 ? 'spelling' : targetLogs.some((log) => !log.isCorrect) ? 'ignorance' : 'others';
-
-  return {
-    content,
-    query: wordInfo.query,
-    tag: {
-      id: crypto.randomUUID(),
-      pastedCharIds: wordInfo.targetCharIds,
-      content,
-    } satisfies Tag,
-  };
+function getNextTagContent(content: TagContent): TagContent | null {
+  switch (content) {
+    case 'ignorance':
+      return 'unaudible';
+    case 'unaudible':
+      return 'spelling';
+    case 'spelling':
+      return null;
+    case 'others':
+      return 'ignorance';
+    default:
+      return 'ignorance';
+  }
 }
 
 export function Window({
@@ -191,14 +202,16 @@ export function Window({
   initialFinishedCharIds,
   sendCompleted,
   requestExplanation,
-  sendMistake,
   onMistakeInput,
+  onMistakeReasonPromptOpen,
+  onMistakeReasonPromptClose,
   onFrameInteracted,
   onFinishedCharIdsChange,
   onTagsChange,
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
+  const [pendingMistake, setPendingMistake] = useState<PendingMistake | null>(null);
   const gameRef = useRef(game);
   const keyboardLogRef = useRef(keyboardLog);
   const keyboardRef = useRef<HTMLDivElement>(null);
@@ -212,6 +225,7 @@ export function Window({
     keyboardLogRef.current = [];
     setKeyboardLog([]);
     hintedWordKeysRef.current = new Set();
+    setPendingMistake(null);
   }, [frame.id]);
 
   useEffect(() => {
@@ -262,6 +276,85 @@ export function Window({
     return splitGameCharsIntoRows(game.gameChars, columnsPerLine);
   }, [columnsPerLine, game.gameChars]);
 
+  const selectMistakeReason = (content: TagContent) => {
+    if (!pendingMistake) {
+      return;
+    }
+
+    const nextTag: Tag = {
+      id: crypto.randomUUID(),
+      pastedCharIds: pendingMistake.targetCharIds,
+      content,
+    };
+
+    setGame((state) => {
+      const nextGame = {
+        ...state,
+        tags: [...state.tags, nextTag],
+      };
+      gameRef.current = nextGame;
+      return nextGame;
+    });
+
+    requestExplanation(pendingMistake.query, { sourceText: pendingMistake.sourceText });
+    hintedWordKeysRef.current.add(pendingMistake.targetCharIds.join(','));
+    setPendingMistake(null);
+    onMistakeReasonPromptClose?.();
+
+    if (pendingMistake.shouldCompleteAfterSelection) {
+      sendCompleted();
+      return;
+    }
+
+    window.setTimeout(() => {
+      keyboardRef.current?.focus();
+    }, 0);
+  };
+
+  const handleTaggedWordClick = (charId: ID) => {
+    if (pendingMistake) {
+      return;
+    }
+
+    const wordInfo = getWordInfo(frame, charId);
+
+    if (!wordInfo) {
+      return;
+    }
+
+    const targetTag = gameRef.current.tags.find((tag) => (
+      tag.pastedCharIds.length === wordInfo.targetCharIds.length &&
+      tag.pastedCharIds.every((tagCharId, index) => tagCharId === wordInfo.targetCharIds[index])
+    ));
+
+    onFrameInteracted();
+
+    setGame((state) => {
+      const nextTags = !targetTag
+        ? [...state.tags, {
+          id: crypto.randomUUID(),
+          pastedCharIds: wordInfo.targetCharIds,
+          content: 'ignorance' as TagContent,
+        }]
+        : (() => {
+          const nextContent = getNextTagContent(targetTag.content);
+          return nextContent == null
+            ? state.tags.filter((tag) => tag.id !== targetTag.id)
+            : state.tags.map((tag) => (
+              tag.id === targetTag.id
+                ? { ...tag, content: nextContent }
+                : tag
+            ));
+        })();
+      const nextGame = {
+        ...state,
+        tags: nextTags,
+      };
+      gameRef.current = nextGame;
+      return nextGame;
+    });
+  };
+
   return (
     <Style
       tabIndex={0}
@@ -269,6 +362,16 @@ export function Window({
       onClick={() => keyboardRef.current?.focus()}
       onKeyDown={(event) => {
         event.stopPropagation();
+        if (pendingMistake) {
+          event.preventDefault();
+          const nextReason = MISTAKE_REASON_KEYS[event.key.toLowerCase()];
+
+          if (nextReason) {
+            selectMistakeReason(nextReason);
+          }
+          return;
+        }
+
         const state = gameRef.current;
         const nextChars = [...state.gameChars];
         const inputIndex = nextChars.findIndex((char) => (
@@ -306,17 +409,16 @@ export function Window({
           const nextWaitIndex = nextChars.findIndex((char) => char.char.isTypeable && char.status === 'wait');
 
           if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
-            const mistake = createMistakeTag(frame, nextKeyboardLog, nextChars[inputIndex].char.id);
             const wordKey = wordInfo?.targetCharIds.join(',');
             const sourceText = wordInfo ? getChineseSourceTextForWordInfo(frame, wordInfo) : undefined;
 
-            if (mistake) {
-              nextTags = [...state.tags, mistake.tag];
-              requestExplanation(mistake.query, { sourceText });
-              sendMistake(mistake.content);
-              if (wordKey) {
-                hintedWordKeysRef.current.add(wordKey);
-              }
+            if (wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds)) {
+              setPendingMistake({
+                ...wordInfo,
+                sourceText,
+                shouldCompleteAfterSelection: nextWaitIndex === -1,
+              });
+              onMistakeReasonPromptOpen?.();
             } else if (
               wordInfo &&
               wordKey &&
@@ -333,7 +435,7 @@ export function Window({
               ...nextChars[nextWaitIndex],
               status: 'available',
             };
-          } else {
+          } else if (!(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
             sendCompleted();
           }
         } else {
@@ -370,8 +472,69 @@ export function Window({
       }}
     >
       {splitCharsByRows.map((chars, index) => (
-        <Line key={chars[0]?.char.id || `line-${index}`} chars={chars} tags={game.tags} />
+        <Line
+          key={chars[0]?.char.id || `line-${index}`}
+          chars={chars}
+          tags={game.tags}
+          onTaggedCharClick={handleTaggedWordClick}
+        />
       ))}
+      {pendingMistake ? (
+        <div style={mistakePromptOverlayStyle}>
+          <div style={mistakePromptStyle} onClick={(event) => event.stopPropagation()}>
+            <div style={mistakePromptTitleStyle}>誤答理由を選んでください</div>
+            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('ignorance')}>
+              J...単語を知らなかった
+            </button>
+            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('unaudible')}>
+              K...聞き取れなかった
+            </button>
+            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('spelling')}>
+              L...スペルミス/タイポ
+            </button>
+          </div>
+        </div>
+      ) : null}
     </Style>
   );
 }
+
+const mistakePromptOverlayStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(9, 14, 18, 0.72)',
+  zIndex: 1,
+};
+
+const mistakePromptStyle: React.CSSProperties = {
+  width: 'min(360px, calc(100% - 32px))',
+  padding: '16px',
+  borderRadius: '12px',
+  background: '#162229',
+  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+};
+
+const mistakePromptTitleStyle: React.CSSProperties = {
+  fontSize: '14px',
+  fontWeight: 700,
+  color: '#ecf2f1',
+  marginBottom: '4px',
+};
+
+const mistakePromptButtonStyle: React.CSSProperties = {
+  appearance: 'none',
+  border: '1px solid rgba(236, 242, 241, 0.16)',
+  borderRadius: '8px',
+  padding: '10px 12px',
+  background: '#24353d',
+  color: '#ecf2f1',
+  fontSize: '14px',
+  textAlign: 'left',
+  cursor: 'pointer',
+};

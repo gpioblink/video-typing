@@ -7,6 +7,19 @@ interface Props {
   position: TagPosition;
 }
 
+function getTagLabel(content: Tag['content']) {
+  switch (content) {
+    case 'ignorance':
+      return 'ignorance';
+    case 'unaudible':
+      return 'unaudible';
+    case 'spelling':
+      return 'spelling';
+    default:
+      return 'others';
+  }
+}
+
 export function TagContentView({ tag, position }: Props) {
-  return <Style position={position}>{tag.content}</Style>;
+  return <Style position={position}>{getTagLabel(tag.content)}</Style>;
 }

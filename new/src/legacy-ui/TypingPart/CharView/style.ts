@@ -1,7 +1,8 @@
 import styled from '@emotion/styled';
 
-export const Layout = styled.div`
+export const Layout = styled.div<{ clickable: boolean }>`
   color: #eeeeee;
+  cursor: ${(props) => (props.clickable ? 'pointer' : 'default')};
 
   .available {
     animation: blinker 1s step-start infinite;

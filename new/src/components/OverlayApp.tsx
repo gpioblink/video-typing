@@ -66,6 +66,7 @@ export function OverlayApp({
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
+  const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
   const mistakeCountsRef = useRef<Record<string, number>>({});
@@ -75,6 +76,7 @@ export function OverlayApp({
     baseRate: number;
     loopIndex: number;
   } | null>(null);
+  const shouldResumeAfterMistakeReasonRef = useRef(false);
 
   const cache = useMemo(() => {
     return createCache({
@@ -265,13 +267,13 @@ export function OverlayApp({
   }, [isActiveFrameComplete, loopCue, timelineCue]);
 
   useEffect(() => {
-    if (loopCue && isActiveFrameComplete) {
+    if (loopCue && isActiveFrameComplete && !isMistakeReasonPromptOpen) {
       setLoopCue(null);
     }
-  }, [isActiveFrameComplete, loopCue]);
+  }, [isActiveFrameComplete, isMistakeReasonPromptOpen, loopCue]);
 
   useEffect(() => {
-    if (!activeCue || isActiveFrameComplete) {
+    if (!activeCue || (isActiveFrameComplete && !isMistakeReasonPromptOpen)) {
       loopRangeRef.current = null;
       restoreControlledPlaybackRate();
       return;
@@ -290,6 +292,7 @@ export function OverlayApp({
     activeFrame.id,
     applyMistakeSensitivePlaybackRate,
     isActiveFrameComplete,
+    isMistakeReasonPromptOpen,
     restoreControlledPlaybackRate,
     subtitleCues,
   ]);
@@ -362,6 +365,33 @@ export function OverlayApp({
 
     void onFrameCompleted?.(activeCue);
   }, [activeCue, onFrameCompleted]);
+
+  const handleMistakeReasonPromptOpen = useCallback(() => {
+    setIsMistakeReasonPromptOpen(true);
+    const video = getVideoElement(targetId);
+
+    if (!video) {
+      shouldResumeAfterMistakeReasonRef.current = false;
+      return;
+    }
+
+    shouldResumeAfterMistakeReasonRef.current = !video.paused;
+    video.pause();
+  }, [targetId]);
+
+  const handleMistakeReasonPromptClose = useCallback(() => {
+    setIsMistakeReasonPromptOpen(false);
+    const video = getVideoElement(targetId);
+    const shouldResume = shouldResumeAfterMistakeReasonRef.current;
+
+    shouldResumeAfterMistakeReasonRef.current = false;
+
+    if (!video || !shouldResume) {
+      return;
+    }
+
+    void video.play().catch(() => undefined);
+  }, [targetId]);
 
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
@@ -444,8 +474,9 @@ export function OverlayApp({
             initialFinishedCharIds={activeProgress.finishedCharIds}
             sendCompleted={handleFrameCompleted}
             requestExplanation={handleRequestExplanation}
-            sendMistake={() => {}}
             onMistakeInput={handleMistakeInput}
+            onMistakeReasonPromptOpen={handleMistakeReasonPromptOpen}
+            onMistakeReasonPromptClose={handleMistakeReasonPromptClose}
             onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}

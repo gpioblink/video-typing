@@ -3,15 +3,16 @@ import { Style } from './style';
 import { CharView } from '../CharView';
 import { TagContentView } from '../TagContentView';
 import { TagLineView } from '../TagLineView';
-import type { Tag } from '../../../types';
+import type { ID, Tag } from '../../../types';
 import type { GameChar } from '../Window';
 
 interface Props {
   chars: GameChar[];
   tags: Tag[];
+  onTaggedCharClick: (charId: ID) => void;
 }
 
-export function Line({ chars, tags }: Props) {
+export function Line({ chars, tags, onTaggedCharClick }: Props) {
   const calcTagPosition = (tag: Tag) => {
     const indexes: number[] = [];
 
@@ -33,7 +34,14 @@ export function Line({ chars, tags }: Props) {
 
   return (
     <Style columnCount={Math.max(chars.length, 1)}>
-      {chars.map((char) => <CharView key={char.char.id} char={char} />)}
+      {chars.map((char) => (
+        <CharView
+          key={char.char.id}
+          char={char}
+          clickable={char.char.isTypeable}
+          onClick={() => onTaggedCharClick(char.char.id)}
+        />
+      ))}
       {tags.map((tag) => {
         const position = calcTagPosition(tag);
         if (position.startPosition === -1) return null;
