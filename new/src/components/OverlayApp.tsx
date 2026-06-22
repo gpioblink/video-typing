@@ -9,7 +9,6 @@ import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
   saveStoredPlaybackPosition,
-  saveStoredSubtitle,
   saveStoredTypingProgress,
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
@@ -57,11 +56,10 @@ export function OverlayApp({
   shadowRoot,
   targetId,
 }: Props) {
-  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>(initialSubtitleCues);
-  const [subtitleFileName, setSubtitleFileName] = useState(initialSubtitleFileName);
-  const [typingFrames, setTypingFrames] = useState<TimedCaptionFrame[] | undefined>(initialTypingFrames);
+  const subtitleCues = initialSubtitleCues;
+  const subtitleFileName = initialSubtitleFileName;
+  const typingFrames = initialTypingFrames;
   const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
-  const [subtitleError, setSubtitleError] = useState('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
@@ -517,23 +515,6 @@ export function OverlayApp({
               targetId={targetId}
               currentTime={currentTime}
               duration={duration}
-              subtitleFileName={subtitleFileName}
-              subtitleError={subtitleError}
-              onSubtitleLoaded={(cues, fileName, nextTypingFrames) => {
-                void saveStoredSubtitle(
-                  pageUrl,
-                  nextTypingFrames ? { cues, fileName, typingFrames: nextTypingFrames } : { cues, fileName },
-                );
-                setSubtitleCues(cues);
-                setTypingFrames(nextTypingFrames);
-                setSubtitleFileName(fileName);
-                setSubtitleError('');
-              }}
-              onSubtitleError={(message) => {
-                setSubtitleCues([]);
-                setSubtitleFileName('');
-                setSubtitleError(message);
-              }}
             />
           </DraggablePanel>
         ) : null}
