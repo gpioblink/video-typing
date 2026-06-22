@@ -184,21 +184,23 @@ export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]>
     ...Object.keys(positions),
   ]);
 
-  return Array.from(urls).map((url) => {
-    const typingProgress = normalizeTypingProgress(progress[url]);
-    const itemMeta = meta[url];
-    const fallbackUpdatedAt = getLatestTypingProgressUpdatedAt(typingProgress) ?? 0;
+  return Array.from(urls)
+    .filter(isExternalHistoryUrlKey)
+    .map((url) => {
+      const typingProgress = normalizeTypingProgress(progress[url]);
+      const itemMeta = meta[url];
+      const fallbackUpdatedAt = getLatestTypingProgressUpdatedAt(typingProgress) ?? 0;
 
-    return {
-      url,
-      title: itemMeta?.title || getUrlFallbackTitle(url),
-      updatedAt: itemMeta?.updatedAt ?? fallbackUpdatedAt,
-      subtitle: subtitles[url],
-      typingProgress,
-      playbackPosition: positions[url],
-      meta: itemMeta,
-    };
-  }).sort((left, right) => right.updatedAt - left.updatedAt);
+      return {
+        url,
+        title: itemMeta?.title || getUrlFallbackTitle(url),
+        updatedAt: itemMeta?.updatedAt ?? fallbackUpdatedAt,
+        subtitle: subtitles[url],
+        typingProgress,
+        playbackPosition: positions[url],
+        meta: itemMeta,
+      };
+    }).sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 function normalizeTypingProgress(progress: Record<string, unknown> | undefined): StoredTypingProgressData {
@@ -310,5 +312,18 @@ function getUrlFallbackTitle(url: string) {
     return parsed.hostname || url;
   } catch {
     return url;
+  }
+}
+
+function isExternalHistoryUrlKey(value: string) {
+  if (!value || value.startsWith('local-player:')) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
   }
 }
