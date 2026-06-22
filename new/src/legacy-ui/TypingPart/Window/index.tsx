@@ -197,6 +197,11 @@ function getNextTagContent(content: TagContent): TagContent | null {
   }
 }
 
+function stopKeyboardEventPropagation(event: React.KeyboardEvent) {
+  event.stopPropagation();
+  event.nativeEvent.stopImmediatePropagation();
+}
+
 export function Window({
   frame,
   initialFinishedCharIds,
@@ -360,8 +365,10 @@ export function Window({
       tabIndex={0}
       ref={keyboardRef}
       onClick={() => keyboardRef.current?.focus()}
+      onKeyUp={stopKeyboardEventPropagation}
+      onKeyPress={stopKeyboardEventPropagation}
       onKeyDown={(event) => {
-        event.stopPropagation();
+        stopKeyboardEventPropagation(event);
         if (pendingMistake) {
           event.preventDefault();
           const nextReason = MISTAKE_REASON_KEYS[event.key.toLowerCase()];

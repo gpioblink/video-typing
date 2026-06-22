@@ -420,6 +420,11 @@ export function OverlayApp({
     });
   }, [activeFrame.id, pageUrl]);
 
+  const stopOverlayKeyboardEventPropagation = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation();
+  }, []);
+
   const handleRequestExplanation = useCallback((
     query: string,
     options?: { silentIfMissing?: boolean; sourceText?: string },
@@ -490,7 +495,12 @@ export function OverlayApp({
 
   return (
     <CacheProvider value={cache}>
-      <div style={overlayStyle}>
+      <div
+        style={overlayStyle}
+        onKeyDown={stopOverlayKeyboardEventPropagation}
+        onKeyUp={stopOverlayKeyboardEventPropagation}
+        onKeyPress={stopOverlayKeyboardEventPropagation}
+      >
         <DraggablePanel
           kind="typing"
           title="Typing"
