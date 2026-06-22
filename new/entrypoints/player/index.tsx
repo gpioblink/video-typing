@@ -447,7 +447,6 @@ function PlayerApp() {
                 initialTypingProgress={activeSession.typingProgress}
                 displaySubtitleCues={activeSession.session.nativeSubtitleCues}
                 displaySubtitleFileName={activeSession.session.nativeSubtitleFileName}
-                showDebugPanel={false}
                 onFrameMistake={handleFrameMistake}
                 onFrameCompleted={handleFrameCompleted}
                 pageUrl={activeSession.storageKey}
