@@ -1,8 +1,10 @@
 import type {
+  ExternalHistoryItem,
   ID,
   PanelKind,
   PanelPosition,
   PanelSize,
+  StoredExternalHistoryMeta,
   StoredFrameProgressData,
   StoredPanelPositions,
   StoredPanelSizes,
@@ -17,6 +19,7 @@ const PANEL_SIZE_STORAGE_KEY = 'videoTypingPrototypePanelSizes';
 const SUBTITLE_STORAGE_KEY = 'videoTypingPrototypeSubtitles';
 const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
 const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
+const EXTERNAL_HISTORY_META_STORAGE_KEY = 'videoTypingPrototypeExternalHistoryMeta';
 
 export async function loadPanelPosition(hostname: string, kind: PanelKind) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
@@ -73,6 +76,13 @@ export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleDa
   });
 }
 
+export async function deleteStoredSubtitle(url: string) {
+  const result = await chrome.storage.local.get(SUBTITLE_STORAGE_KEY);
+  const subtitles = { ...((result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>) };
+  delete subtitles[url];
+  await chrome.storage.local.set({ [SUBTITLE_STORAGE_KEY]: subtitles });
+}
+
 export async function loadStoredTypingProgress(url: string) {
   const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
@@ -98,6 +108,13 @@ export async function saveStoredTypingProgress(
   });
 }
 
+export async function deleteStoredTypingProgress(url: string) {
+  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const progress = { ...((result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>) };
+  delete progress[url];
+  await chrome.storage.local.set({ [PROGRESS_STORAGE_KEY]: progress });
+}
+
 export async function loadStoredPlaybackPosition(url: string) {
   const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
   const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
@@ -113,6 +130,75 @@ export async function saveStoredPlaybackPosition(url: string, currentTime: numbe
       [url]: { currentTime },
     },
   });
+}
+
+export async function deleteStoredPlaybackPosition(url: string) {
+  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const positions = { ...((result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>) };
+  delete positions[url];
+  await chrome.storage.local.set({ [PLAYBACK_STORAGE_KEY]: positions });
+}
+
+export async function loadExternalHistoryMeta(url: string) {
+  const result = await chrome.storage.local.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  return meta[url];
+}
+
+export async function saveExternalHistoryMeta(url: string, nextMeta: StoredExternalHistoryMeta) {
+  const result = await chrome.storage.local.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  await chrome.storage.local.set({
+    [EXTERNAL_HISTORY_META_STORAGE_KEY]: {
+      ...meta,
+      [url]: nextMeta,
+    },
+  });
+}
+
+export async function clearStoredProgressState(storageKey: string) {
+  await Promise.all([
+    deleteStoredTypingProgress(storageKey),
+    deleteStoredPlaybackPosition(storageKey),
+  ]);
+}
+
+export async function clearStoredSubtitleSetting(url: string) {
+  await deleteStoredSubtitle(url);
+}
+
+export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]> {
+  const result = await chrome.storage.local.get([
+    SUBTITLE_STORAGE_KEY,
+    PROGRESS_STORAGE_KEY,
+    PLAYBACK_STORAGE_KEY,
+    EXTERNAL_HISTORY_META_STORAGE_KEY,
+  ]);
+  const subtitles = (result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>;
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  const urls = new Set([
+    ...Object.keys(subtitles),
+    ...Object.keys(progress),
+    ...Object.keys(positions),
+  ]);
+
+  return Array.from(urls).map((url) => {
+    const typingProgress = normalizeTypingProgress(progress[url]);
+    const itemMeta = meta[url];
+    const fallbackUpdatedAt = getLatestTypingProgressUpdatedAt(typingProgress) ?? 0;
+
+    return {
+      url,
+      title: itemMeta?.title || getUrlFallbackTitle(url),
+      updatedAt: itemMeta?.updatedAt ?? fallbackUpdatedAt,
+      subtitle: subtitles[url],
+      typingProgress,
+      playbackPosition: positions[url],
+      meta: itemMeta,
+    };
+  }).sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 function normalizeTypingProgress(progress: Record<string, unknown> | undefined): StoredTypingProgressData {
@@ -200,4 +286,29 @@ function normalizeTags(value: unknown): Tag[] {
       content: candidate.content,
     }];
   });
+}
+
+function getLatestTypingProgressUpdatedAt(progress: StoredTypingProgressData) {
+  let latestUpdatedAt: number | undefined;
+
+  for (const frameProgress of Object.values(progress)) {
+    if (typeof frameProgress.updatedAt !== 'number') {
+      continue;
+    }
+
+    latestUpdatedAt = typeof latestUpdatedAt === 'number'
+      ? Math.max(latestUpdatedAt, frameProgress.updatedAt)
+      : frameProgress.updatedAt;
+  }
+
+  return latestUpdatedAt;
+}
+
+function getUrlFallbackTitle(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || url;
+  } catch {
+    return url;
+  }
 }

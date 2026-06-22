@@ -9,12 +9,16 @@ import {
   touchLocalPlayerSession,
 } from '../../src/lib/localPlayerDb';
 import {
+  clearStoredProgressState,
+  clearStoredSubtitleSetting,
+  listExternalHistoryItems,
   loadStoredPlaybackPosition,
   loadStoredTypingProgress,
 } from '../../src/lib/storage';
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../../src/lib/chineseTyping';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../../src/lib/subtitles';
 import type {
+  ExternalHistoryItem,
   StoredLocalPlayerSession,
   StoredTypingProgressData,
   SubtitleCue,
@@ -61,6 +65,7 @@ function PlayerApp() {
   const [subtitleHandle, setSubtitleHandle] = useState<FileSystemFileHandle | null>(null);
   const [nativeSubtitleHandle, setNativeSubtitleHandle] = useState<FileSystemFileHandle | null>(null);
   const [sessions, setSessions] = useState<StoredLocalPlayerSession[]>([]);
+  const [externalHistoryItems, setExternalHistoryItems] = useState<ExternalHistoryItem[]>([]);
   const [progressSummaries, setProgressSummaries] = useState<Record<string, string>>({});
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [mainVideoUrl, setMainVideoUrl] = useState('');
@@ -71,15 +76,18 @@ function PlayerApp() {
   const targetId = useMemo(() => `video-typing-local-${Date.now()}`, []);
 
   const refreshSessions = useCallback(() => {
-    void listLocalPlayerSessions().then((items) => {
+    void Promise.all([
+      listLocalPlayerSessions(),
+      listExternalHistoryItems(),
+    ]).then(async ([items, externalItems]) => {
       setSessions(items);
-      return Promise.all(items.map(async (session) => {
+      setExternalHistoryItems(externalItems);
+      const summaries = await Promise.all(items.map(async (session) => {
         const progress = await loadStoredTypingProgress(createLocalPlayerStorageKey(session.id));
         return [session.id, summarizeSessionProgress(session, progress)] as const;
       }));
-    }).then((summaries) => {
       setProgressSummaries(Object.fromEntries(summaries));
-    }).catch(() => setStatus('Failed to load local player history.'));
+    }).catch(() => setStatus('Failed to load history.'));
   }, []);
 
   useEffect(() => {
@@ -259,6 +267,41 @@ function PlayerApp() {
     }
   };
 
+  const handleDeleteLocalProgress = async (session: StoredLocalPlayerSession) => {
+    try {
+      await clearStoredProgressState(createLocalPlayerStorageKey(session.id));
+      setStatus('Deleted built-in player progress.');
+      refreshSessions();
+    } catch {
+      setStatus('Failed to delete built-in player progress.');
+    }
+  };
+
+  const handleOpenExternalPage = (item: ExternalHistoryItem) => {
+    window.open(item.url, '_blank', 'noopener,noreferrer');
+    setStatus('Opened page. Click the extension button on that tab to resume.');
+  };
+
+  const handleDeleteExternalProgress = async (item: ExternalHistoryItem) => {
+    try {
+      await clearStoredProgressState(item.url);
+      setStatus('Deleted external site progress.');
+      refreshSessions();
+    } catch {
+      setStatus('Failed to delete external site progress.');
+    }
+  };
+
+  const handleDeleteExternalSubtitle = async (item: ExternalHistoryItem) => {
+    try {
+      await clearStoredSubtitleSetting(item.url);
+      setStatus('Deleted external site subtitle setting.');
+      refreshSessions();
+    } catch {
+      setStatus('Failed to delete external site subtitle setting.');
+    }
+  };
+
   const replayNativeCue = useCallback((cue: SubtitleCue) => {
     const mainVideo = mainVideoRef.current;
     const nativeVideo = nativeAudioRef.current;
@@ -402,26 +445,83 @@ function PlayerApp() {
               </div>
             </section>
 
-            <section className="playerPanel">
-              <h2>Built-in player history</h2>
-              <div className="historyList">
-                {sessions.length === 0 ? (
-                  <div className="statusText">No local player history.</div>
-                ) : sessions.map((session) => (
-                  <button
-                    className="historyItem"
-                    key={session.id}
-                    type="button"
-                    onClick={() => { window.location.hash = `session=${session.id}`; }}
-                  >
-                    <strong>{session.title}</strong>
-                    <span>{session.subtitleFileName}</span>
-                    <span>{progressSummaries[session.id] || 'Progress loading...'}</span>
-                    <span>{new Date(session.updatedAt).toLocaleString()}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
+            <div className="historyColumn">
+              <section className="playerPanel">
+                <h2>Built-in player history</h2>
+                <div className="historyList">
+                  {sessions.length === 0 ? (
+                    <div className="statusText">No local player history.</div>
+                  ) : sessions.map((session) => (
+                    <article className="historyCard" key={session.id}>
+                      <div className="historyCardBody">
+                        <strong>{session.title}</strong>
+                        <span>{session.subtitleFileName}</span>
+                        <span>{progressSummaries[session.id] || 'Progress loading...'}</span>
+                        <span>{formatHistoryDate(session.updatedAt)}</span>
+                      </div>
+                      <div className="historyActions">
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => { window.location.hash = `session=${session.id}`; }}
+                        >
+                          Open
+                        </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleDeleteLocalProgress(session)}
+                        >
+                          Delete progress
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="playerPanel">
+                <h2>External site history</h2>
+                <div className="historyList">
+                  {externalHistoryItems.length === 0 ? (
+                    <div className="statusText">No external site history.</div>
+                  ) : externalHistoryItems.map((item) => (
+                    <article className="historyCard" key={item.url}>
+                      <div className="historyCardBody">
+                        <strong>{item.title}</strong>
+                        <span>{item.url}</span>
+                        <span>{summarizeExternalHistoryItem(item)}</span>
+                        <span>{formatHistoryDate(item.updatedAt)}</span>
+                      </div>
+                      <div className="historyActions">
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => handleOpenExternalPage(item)}
+                        >
+                          Open page
+                        </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleDeleteExternalProgress(item)}
+                        >
+                          Delete progress
+                        </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleDeleteExternalSubtitle(item)}
+                          disabled={!item.subtitle}
+                        >
+                          Delete subtitle
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
           </div>
         ) : (
           <section className="videoStage">
@@ -598,7 +698,23 @@ function summarizeSessionProgress(
   session: StoredLocalPlayerSession,
   typingProgress: StoredTypingProgressData,
 ) {
-  const frames = session.typingFrames || session.subtitleCues.map((cue) => ({
+  return summarizeProgress(session.subtitleCues, typingProgress, session.typingFrames);
+}
+
+function summarizeExternalHistoryItem(item: ExternalHistoryItem) {
+  if (!item.subtitle) {
+    return 'Subtitle setting removed';
+  }
+
+  return summarizeProgress(item.subtitle.cues, item.typingProgress, item.subtitle.typingFrames);
+}
+
+function summarizeProgress(
+  subtitleCues: SubtitleCue[],
+  typingProgress: StoredTypingProgressData,
+  typingFrames?: TimedCaptionFrame[],
+) {
+  const frames = typingFrames || subtitleCues.map((cue) => ({
     ...subtitleCueToCaptionFrame(cue),
     start: cue.start,
     end: cue.end,
@@ -611,6 +727,14 @@ function summarizeSessionProgress(
   }).length;
 
   return `${completed.toLocaleString()} / ${frames.length.toLocaleString()} subtitles completed`;
+}
+
+function formatHistoryDate(timestamp: number) {
+  if (!timestamp) {
+    return 'No activity timestamp';
+  }
+
+  return new Date(timestamp).toLocaleString();
 }
 
 function waitForMediaTime(media: HTMLMediaElement, endTime: number) {

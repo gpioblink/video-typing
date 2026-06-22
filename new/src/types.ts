@@ -99,6 +99,21 @@ export interface StoredPlaybackPositionData {
   currentTime: number;
 }
 
+export interface StoredExternalHistoryMeta {
+  title: string;
+  updatedAt: number;
+}
+
+export interface ExternalHistoryItem {
+  url: string;
+  title: string;
+  updatedAt: number;
+  subtitle?: StoredSubtitleData;
+  typingProgress: StoredTypingProgressData;
+  playbackPosition?: StoredPlaybackPositionData;
+  meta?: StoredExternalHistoryMeta;
+}
+
 export interface StoredLocalPlayerSession {
   id: string;
   title: string;

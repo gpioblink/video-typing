@@ -7,6 +7,7 @@ import {
   loadStoredPlaybackPosition,
   loadStoredSubtitle,
   loadStoredTypingProgress,
+  saveExternalHistoryMeta,
   saveStoredPlaybackPosition,
   saveStoredSubtitle,
 } from '../src/lib/storage';
@@ -56,6 +57,11 @@ export default defineContentScript({
       return;
     }
 
+    await saveExternalHistoryMeta(pageUrl, {
+      title: document.title || pageUrl,
+      updatedAt: Date.now(),
+    });
+
     if (!storedSubtitle) {
       await saveStoredSubtitle(pageUrl, subtitleFile);
     }
@@ -102,13 +108,23 @@ export default defineContentScript({
       },
     });
 
+    const persistExternalHistoryMeta = () => {
+      void saveExternalHistoryMeta(pageUrl, {
+        title: document.title || pageUrl,
+        updatedAt: Date.now(),
+      });
+    };
+
     window[OVERLAY_KEY] = {
       remove: () => {
+        window.removeEventListener('pagehide', persistExternalHistoryMeta);
         ui.remove();
       },
     };
 
     ui.mount();
+
+    window.addEventListener('pagehide', persistExternalHistoryMeta, { once: true });
   },
 });
 
