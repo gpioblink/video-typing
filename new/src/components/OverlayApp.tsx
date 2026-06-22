@@ -63,7 +63,6 @@ export function OverlayApp({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
-  const [englishHintQueryHistory, setEnglishHintQueryHistory] = useState<string[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
   const currentTimeRef = useRef(0);
@@ -427,26 +426,43 @@ export function OverlayApp({
   ) => {
     const isChineseTypingMode = Boolean(typingFrames?.length);
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
-    const rememberEnglishQuery = () => {
-      if (isChineseTypingMode) {
-        return;
-      }
 
-      setEnglishHintQueryHistory((state) => {
-        const filtered = state.filter((item) => item !== query);
-        return [query, ...filtered].slice(0, 10);
+    if (isChineseTypingMode) {
+      void searchExtensionChineseDictionary(displayQuery, activeCue?.text || '').then((entries) => {
+        if (entries.length === 0 && options?.silentIfMissing) {
+          return;
+        }
+
+        const nextWords: DictionaryWord[] = entries.length > 0
+          ? entries.map((entry) => ({
+            title: entry.headword,
+            content: entry.body,
+            dictionaryEntryKey: entry.key,
+          }))
+          : [{
+            title: displayQuery,
+            content: 'Dictionary entry was not found.',
+          }];
+
+        setHintWords((state) => mergeHintWords(state, nextWords));
+      }).catch(() => {
+        if (options?.silentIfMissing) {
+          return;
+        }
+
+        setHintWords((state) => mergeHintWords(state, [{
+          title: displayQuery,
+          content: 'Dictionary search failed.',
+        }]));
       });
-    };
-    const searchPromise = isChineseTypingMode
-      ? searchExtensionChineseDictionary(displayQuery, activeCue?.text || '')
-      : searchExtensionDictionary(query, activeCue?.text || '');
 
-    void searchPromise.then((entries) => {
+      return;
+    }
+
+    void searchExtensionDictionary(query, activeCue?.text || '').then((entries) => {
       if (entries.length === 0 && options?.silentIfMissing) {
         return;
       }
-
-      rememberEnglishQuery();
 
       const nextWords: DictionaryWord[] = entries.length > 0
         ? entries.map((entry) => ({
@@ -459,32 +475,16 @@ export function OverlayApp({
           content: 'Dictionary entry was not found.',
         }];
 
-      setHintWords((state) => {
-        const existingKeys = new Set(nextWords.map((word) => `${word.title}\u0000${word.content}`));
-        const existingEntryKeys = new Set(nextWords.flatMap((word) => (
-          word.dictionaryEntryKey ? [word.dictionaryEntryKey] : []
-        )));
-        const filtered = state.filter((word) => (
-          !existingKeys.has(`${word.title}\u0000${word.content}`) &&
-          !(word.dictionaryEntryKey && existingEntryKeys.has(word.dictionaryEntryKey))
-        ));
-        return [...nextWords, ...filtered].slice(0, 10);
-      });
+      setHintWords((state) => mergeHintWords(state, nextWords));
     }).catch(() => {
       if (options?.silentIfMissing) {
         return;
       }
 
-      rememberEnglishQuery();
-
-      setHintWords((state) => {
-        const nextWord = {
+      setHintWords((state) => mergeHintWords(state, [{
           title: displayQuery,
           content: 'Dictionary search failed.',
-        };
-        const filtered = state.filter((word) => word.title !== nextWord.title || word.content !== nextWord.content);
-        return [nextWord, ...filtered].slice(0, 10);
-      });
+        }]));
     });
   }, [activeCue?.text, typingFrames?.length]);
 
@@ -530,7 +530,6 @@ export function OverlayApp({
               targetId={targetId}
               currentTime={currentTime}
               duration={duration}
-              englishHintQueryHistory={englishHintQueryHistory}
             />
           </DraggablePanel>
         ) : null}
@@ -556,6 +555,19 @@ const overlayStyle: React.CSSProperties = {
   zIndex: 2147483646,
   pointerEvents: 'none',
 };
+
+function mergeHintWords(state: DictionaryWord[], nextWords: DictionaryWord[]) {
+  const existingKeys = new Set(nextWords.map((word) => `${word.title}\u0000${word.content}`));
+  const existingEntryKeys = new Set(nextWords.flatMap((word) => (
+    word.dictionaryEntryKey ? [word.dictionaryEntryKey] : []
+  )));
+  const filtered = state.filter((word) => (
+    !existingKeys.has(`${word.title}\u0000${word.content}`) &&
+    !(word.dictionaryEntryKey && existingEntryKeys.has(word.dictionaryEntryKey))
+  ));
+
+  return [...nextWords, ...filtered].slice(0, 10);
+}
 
 function areTagsEqual(left: Tag[], right: Tag[]) {
   if (left.length !== right.length) {

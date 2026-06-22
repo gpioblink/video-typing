@@ -173,26 +173,76 @@ export async function searchDictionary(
   contextText = '',
 ): Promise<DictionaryEntry[]> {
   const normalizedQuery = normalizeDictionaryHeadword(query, kind);
+  const englishLookupLogGroups: EnglishLookupCandidateLogGroup[] = [];
 
   if (!normalizedQuery) {
     return [];
   }
 
   if (kind === 'english' && contextText.trim()) {
-    const contextMatches = await searchEnglishContextDictionary(normalizedQuery, contextText);
+    const candidateGroups = createEnglishLookupCandidateGroups(normalizedQuery, contextText);
+
+    englishLookupLogGroups.push(...candidateGroups.map((candidates, index) => ({
+      label: `Context group ${index + 1}`,
+      candidates,
+    })));
+
+    const contextMatches = await searchEnglishCandidateGroups(candidateGroups);
 
     if (contextMatches.length > 0) {
+      logEnglishLookupCandidates(query, normalizedQuery, englishLookupLogGroups);
       return contextMatches;
     }
+  }
+
+  if (kind === 'english') {
+    englishLookupLogGroups.push({
+      label: 'Exact query',
+      candidates: [normalizedQuery],
+    });
   }
 
   const exactMatches = await getEntriesByNormalizedHeadword(normalizedQuery, kind);
 
   if (exactMatches.length > 0) {
+    if (kind === 'english') {
+      logEnglishLookupCandidates(query, normalizedQuery, englishLookupLogGroups);
+    }
     return exactMatches.slice(0, MAX_SEARCH_RESULTS);
   }
 
-  return getEntriesByHeadwordPrefix(normalizedQuery, MAX_SEARCH_RESULTS, kind);
+  if (kind === 'english') {
+    englishLookupLogGroups.push({
+      label: 'Prefix query',
+      candidates: [normalizedQuery],
+    });
+  }
+
+  const prefixMatches = await getEntriesByHeadwordPrefix(normalizedQuery, MAX_SEARCH_RESULTS, kind);
+
+  if (kind === 'english') {
+    logEnglishLookupCandidates(query, normalizedQuery, englishLookupLogGroups);
+  }
+
+  return prefixMatches;
+}
+
+interface EnglishLookupCandidateLogGroup {
+  label: string;
+  candidates: string[];
+}
+
+function logEnglishLookupCandidates(
+  query: string,
+  normalizedQuery: string,
+  groups: EnglishLookupCandidateLogGroup[],
+) {
+  console.log('[video-typing] English lookup candidates', {
+    query,
+    normalizedQuery,
+    groups,
+    candidates: groups.flatMap((group) => group.candidates),
+  });
 }
 
 export async function searchChineseDictionary(
@@ -233,12 +283,7 @@ export async function searchChineseDictionary(
   return results;
 }
 
-async function searchEnglishContextDictionary(
-  normalizedQuery: string,
-  contextText: string,
-): Promise<DictionaryEntry[]> {
-  const candidateGroups = createEnglishLookupCandidateGroups(normalizedQuery, contextText);
-
+async function searchEnglishCandidateGroups(candidateGroups: string[][]): Promise<DictionaryEntry[]> {
   for (const candidates of candidateGroups) {
     const groupResults: DictionaryEntry[] = [];
     const seenKeys = new Set<string>();
