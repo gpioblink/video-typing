@@ -14,6 +14,7 @@ import {
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../src/lib/chineseTyping';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
+import { seekVideo } from '../src/lib/video';
 import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
@@ -77,6 +78,7 @@ export default defineContentScript({
     video.setAttribute(VIDEO_ATTR, targetId);
     await restorePlaybackPosition(
       video,
+      targetId,
       getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
     );
 
@@ -196,14 +198,14 @@ async function requestChineseTypingJsonFiles(fileName: string, text: string): Pr
   }
 }
 
-async function restorePlaybackPosition(video: HTMLVideoElement, currentTime?: number) {
+async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string, currentTime?: number) {
   if (currentTime == null || !Number.isFinite(currentTime)) {
     return;
   }
 
   const apply = () => {
     const duration = Number.isFinite(video.duration) ? video.duration : currentTime;
-    video.currentTime = Math.max(0, Math.min(currentTime, duration));
+    seekVideo(targetId, Math.min(currentTime, duration));
   };
 
   if (video.readyState >= 1) {
