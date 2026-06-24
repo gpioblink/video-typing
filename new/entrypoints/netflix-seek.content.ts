@@ -319,16 +319,25 @@ async function replayNativeAudio(
   const video = document.querySelector('video');
   const wasPaused = Boolean(video?.paused);
 
-  player.setAudioTrack?.(nativeTrack);
-  player.seek?.(Math.max(0, Math.round(startSeconds * 1000)));
-  player.play?.();
-  await video?.play?.().catch(() => undefined);
-  await waitForNetflixPlaybackTime(player, startSeconds, endSeconds);
-  player.setAudioTrack?.(englishTrack);
+  if (video) {
+    video.playbackRate = 1;
+  }
 
-  if (wasPaused) {
-    player.pause?.();
-    video?.pause?.();
+  try {
+    player.setAudioTrack?.(nativeTrack);
+    player.seek?.(Math.max(0, Math.round(startSeconds * 1000)));
+    player.play?.();
+    await video?.play?.().catch(() => undefined);
+    await waitForNetflixPlaybackTime(player, startSeconds, endSeconds);
+  } finally {
+    try {
+      player.setAudioTrack?.(englishTrack);
+    } finally {
+      if (wasPaused) {
+        player.pause?.();
+        video?.pause?.();
+      }
+    }
   }
 }
 

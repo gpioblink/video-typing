@@ -118,7 +118,7 @@ export default defineContentScript({
             displaySubtitleFileName={subtitleFile.displaySubtitleFileName}
             onFrameMistake={(cue, mistakeCount) => {
               if (mistakeCount > 0 && mistakeCount % 5 === 0) {
-                void replayNetflixNativeCue(subtitleFile, cue);
+                return replayNetflixNativeCue(subtitleFile, cue);
               }
             }}
             onFrameCompleted={(cue) => replayNetflixNativeCue(subtitleFile, cue)}

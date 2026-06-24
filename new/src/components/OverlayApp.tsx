@@ -35,7 +35,7 @@ interface Props {
   displaySubtitleCues?: SubtitleCue[];
   displaySubtitleFileName?: string;
   showDebugPanel?: boolean;
-  onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => void;
+  onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
   pageUrl: string;
   targetId: string;
@@ -69,9 +69,9 @@ export function OverlayApp({
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
   const mistakeCountsRef = useRef<Record<string, number>>({});
   const activeFrameIdRef = useRef('');
+  const nativeReplayCountRef = useRef(0);
   const controlledPlaybackRateRef = useRef<{
     frameId: string;
-    baseRate: number;
     loopIndex: number;
   } | null>(null);
   const shouldResumeAfterMistakeReasonRef = useRef(false);
@@ -84,14 +84,18 @@ export function OverlayApp({
   }, [shadowRoot]);
 
   const restoreControlledPlaybackRate = useCallback((video = getVideoElement(targetId)) => {
-    const controlledPlaybackRate = controlledPlaybackRateRef.current;
-
-    if (!video || !controlledPlaybackRate) {
+    if (!video) {
       controlledPlaybackRateRef.current = null;
       return;
     }
 
-    video.playbackRate = controlledPlaybackRate.baseRate;
+    if (nativeReplayCountRef.current > 0) {
+      video.playbackRate = 1;
+      controlledPlaybackRateRef.current = null;
+      return;
+    }
+
+    video.playbackRate = 1;
     controlledPlaybackRateRef.current = null;
   }, [targetId]);
 
@@ -106,9 +110,16 @@ export function OverlayApp({
       return;
     }
 
+    if (nativeReplayCountRef.current > 0) {
+      video.playbackRate = 1;
+      return;
+    }
+
     if (mistakeCount < SLOW_PLAYBACK_MISTAKE_THRESHOLD) {
-      if (controlledPlaybackRateRef.current?.frameId === frameId) {
+      if (controlledPlaybackRateRef.current) {
         restoreControlledPlaybackRate(video);
+      } else {
+        video.playbackRate = 1;
       }
       return;
     }
@@ -117,7 +128,6 @@ export function OverlayApp({
       restoreControlledPlaybackRate(video);
       controlledPlaybackRateRef.current = {
         frameId,
-        baseRate: video.playbackRate || 1,
         loopIndex: 0,
       };
     } else if (options?.advanceLoop) {
@@ -132,8 +142,33 @@ export function OverlayApp({
 
     video.playbackRate = controlledPlaybackRate.loopIndex % 2 === 0
       ? SLOW_PLAYBACK_RATE
-      : controlledPlaybackRate.baseRate;
+      : 1;
   }, [restoreControlledPlaybackRate, targetId]);
+
+  const trackNativeReplay = useCallback((replay: Promise<void> | void) => {
+    if (!replay) {
+      return;
+    }
+
+    nativeReplayCountRef.current += 1;
+    void replay
+      .catch(() => undefined)
+      .finally(() => {
+        nativeReplayCountRef.current = Math.max(0, nativeReplayCountRef.current - 1);
+
+        if (nativeReplayCountRef.current > 0) {
+          return;
+        }
+
+        const frameId = activeFrameIdRef.current;
+
+        if (frameId && loopRangeRef.current) {
+          applyMistakeSensitivePlaybackRate(frameId, mistakeCountsRef.current[frameId] || 0);
+        } else {
+          restoreControlledPlaybackRate();
+        }
+      });
+  }, [applyMistakeSensitivePlaybackRate, restoreControlledPlaybackRate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -361,16 +396,16 @@ export function OverlayApp({
       [activeFrame.id]: nextCount,
     };
     applyMistakeSensitivePlaybackRate(activeFrame.id, nextCount);
-    onFrameMistake?.(activeCue, nextCount);
-  }, [activeCue, activeFrame.id, applyMistakeSensitivePlaybackRate, onFrameMistake]);
+    trackNativeReplay(onFrameMistake?.(activeCue, nextCount));
+  }, [activeCue, activeFrame.id, applyMistakeSensitivePlaybackRate, onFrameMistake, trackNativeReplay]);
 
   const handleFrameCompleted = useCallback(() => {
     if (!activeCue) {
       return;
     }
 
-    void onFrameCompleted?.(activeCue);
-  }, [activeCue, onFrameCompleted]);
+    trackNativeReplay(onFrameCompleted?.(activeCue));
+  }, [activeCue, onFrameCompleted, trackNativeReplay]);
 
   const handleMistakeReasonPromptOpen = useCallback(() => {
     setIsMistakeReasonPromptOpen(true);
