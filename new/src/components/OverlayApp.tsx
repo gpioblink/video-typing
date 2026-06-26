@@ -512,12 +512,17 @@ export function OverlayApp({
 
   const handleRequestExplanation = useCallback((
     query: string,
-    options?: { contextText?: string; silentIfMissing?: boolean; sourceText?: string },
+    options?: {
+      contextText?: string;
+      priority?: boolean;
+      silentIfMissing?: boolean;
+      sourceText?: string;
+    },
   ) => {
     const isChineseTypingMode = Boolean(typingFrames?.length);
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
     const contextText = options?.contextText ?? activeCue?.text ?? '';
-    const isPriorityHint = !options?.silentIfMissing;
+    const isPriorityHint = options?.priority ?? !options?.silentIfMissing;
     const requestedFrameId = activeFrame.id;
     const frameGeneration = hintFrameGenerationRef.current;
     const requestOrder = hintRequestOrderRef.current + 1;

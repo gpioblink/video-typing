@@ -22,6 +22,9 @@ const WINDOWS = {
   wantYouToThinkThat: 'I want you to think That I\'m the cutest girl',
   followOurTaleToTheEnd: 'I sincerely hope you\'ll follow our tale to the very end.',
   bustMyHumpAwfulChick: 'to bust my hump dealing with that awful chick all day long.',
+  itsSoFrilly: 'It\'s so frilly!',
+  thatIsSoLame: 'That is so lame.',
+  tallTimidBashfulType: 'and a tall yet timid and bashful type.',
 };
 
 const SEARCH_CASES = [
@@ -271,6 +274,39 @@ const SEARCH_CASES = [
     expectedContextText: 'to bust my hump dealing with that awful chick all day long',
     query: 'long',
     expectedHeadwordsInOrder: ['long', 'all day long'],
+  },
+  {
+    label: 'typed context does not prefix-match unrelated it is phrases / It\'s',
+    contextText: createContextThroughWord(WINDOWS.itsSoFrilly, 'It\'s'),
+    expectedContextText: 'It\'s',
+    forbiddenHeadwords: [
+      'it\'s a badge of honor for someone to',
+      'It\'s a Battlefield',
+      'it\'s a bit too early to',
+      'it\'s a case where',
+      'it\'s a cinch to',
+      'it\'s a comfort to watch',
+      'it\'s a confessed fact that',
+      'it\'s a crying shame that',
+      'it\'s a darned shame that',
+      'it\'s a fact that',
+    ],
+    query: 'It\'s',
+    expectedHeadwordsInOrder: ['it is'],
+  },
+  {
+    label: 'tall yet timid and bashful type / type',
+    contextText: createContextThroughWord(WINDOWS.tallTimidBashfulType, 'type'),
+    expectedContextText: 'and a tall yet timid and bashful type',
+    query: 'type',
+    expectedHeadwordsInOrder: ['type'],
+  },
+  {
+    label: 'That is so lame / lame',
+    contextText: createContextThroughWord(WINDOWS.thatIsSoLame, 'lame'),
+    expectedContextText: 'That is so lame',
+    query: 'lame',
+    expectedHeadwordsInOrder: ['lame'],
   },
 ];
 

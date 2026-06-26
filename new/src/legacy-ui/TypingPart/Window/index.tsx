@@ -28,6 +28,7 @@ interface Props {
 
 interface ExplanationRequestOptions {
   contextText?: string;
+  priority?: boolean;
   silentIfMissing?: boolean;
   sourceText?: string;
 }
@@ -539,11 +540,17 @@ export function Window({
                 trigger: 'word-completed',
                 query: wordInfo.query,
                 isLastWord: nextWaitIndex === -1,
-                silentIfMissing: true,
+                priority: false,
+                silentIfMissing: false,
               });
               explanationPromise = requestExplanation(
                 wordInfo.query,
-                { contextText, silentIfMissing: true, sourceText },
+                {
+                  contextText,
+                  priority: false,
+                  silentIfMissing: false,
+                  sourceText,
+                },
               );
             }
           }

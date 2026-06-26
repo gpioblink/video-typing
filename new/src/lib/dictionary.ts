@@ -241,6 +241,11 @@ export async function searchDictionaryWithLookup(
       'direct',
       MAX_DIRECT_SEARCH_RESULTS,
     );
+
+    if (directMatches.length === 0) {
+      logEnglishLookupCandidates(requestId, query, normalizedQuery, englishLookupLogGroups);
+      return [];
+    }
   }
 
   if (kind === 'english' && contextText.trim()) {

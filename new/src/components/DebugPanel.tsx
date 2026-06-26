@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { HINT_DEBUG_BUILD_TIME } from '../lib/hintDebug';
 import { getVideoElement, seekVideo } from '../lib/video';
 
 interface Props {
@@ -36,8 +37,21 @@ export function DebugPanel({
       <div style={{ fontSize: 12, opacity: 0.9 }}>
         {currentTime.toFixed(1)} / {duration.toFixed(1)}
       </div>
+      <div style={{ fontSize: 11, opacity: 0.75 }}>
+        Build: {formatBuildTime(HINT_DEBUG_BUILD_TIME)}
+      </div>
     </div>
   );
+}
+
+function formatBuildTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
 }
 
 const rowStyle: React.CSSProperties = {
