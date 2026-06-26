@@ -9,6 +9,7 @@ import {
   normalizeDictionaryHeadword,
   searchDictionaryWithLookup,
 } from '../src/lib/dictionary.ts';
+import { createTypedHintContextText } from '../src/lib/hintContext.ts';
 
 const DICTIONARY_TSV_PATH = new URL('../../test/EIJIRO144-10.tsv', import.meta.url);
 
@@ -20,6 +21,7 @@ const WINDOWS = {
   workOut: 'It\'s all going to work out,',
   wantYouToThinkThat: 'I want you to think That I\'m the cutest girl',
   followOurTaleToTheEnd: 'I sincerely hope you\'ll follow our tale to the very end.',
+  bustMyHumpAwfulChick: 'to bust my hump dealing with that awful chick all day long.',
 };
 
 const SEARCH_CASES = [
@@ -207,13 +209,68 @@ const SEARCH_CASES = [
     label: 'follow someone to and to the very end / very',
     contextText: WINDOWS.followOurTaleToTheEnd,
     query: 'very',
-    expectedHeadwordsInOrder: ['very', 'to the very end'],
+    expectedHeadwordsInOrder: ['very', 'to the very end', 'very end'],
   },
   {
     label: 'follow someone to and to the very end / end',
     contextText: WINDOWS.followOurTaleToTheEnd,
     query: 'end',
-    expectedHeadwordsInOrder: ['end', 'to the very end'],
+    expectedHeadwordsInOrder: ['end', 'to the very end', 'very end'],
+  },
+  {
+    label: 'typed context excludes future words / something',
+    contextText: createContextThroughWord(
+      'We\'ll find something\nfor you to play. Cool?',
+      'something',
+    ),
+    expectedContextText: 'We\'ll find something',
+    forbiddenHeadwords: ['play cool'],
+    query: 'something',
+    expectedHeadwordsInOrder: ['something'],
+  },
+  {
+    label: 'typed context excludes future words / play',
+    contextText: createContextThroughWord(
+      'We\'ll find something\nfor you to play. Cool?',
+      'play',
+    ),
+    expectedContextText: 'We\'ll find something\nfor you to play',
+    forbiddenHeadwords: ['play cool'],
+    query: 'play',
+    expectedHeadwordsInOrder: ['play'],
+  },
+  {
+    label: 'typed context includes completed sentence-crossing phrase / Cool',
+    contextText: createContextThroughWord(
+      'We\'ll find something\nfor you to play. Cool?',
+      'Cool',
+    ),
+    expectedContextText: 'We\'ll find something\nfor you to play. Cool',
+    query: 'Cool',
+    expectedHeadwordsInOrder: ['cool', 'play cool'],
+  },
+  {
+    label: 'bust my hump dealing with that awful chick / awful',
+    contextText: createContextThroughWord(WINDOWS.bustMyHumpAwfulChick, 'awful'),
+    expectedContextText: 'to bust my hump dealing with that awful',
+    forbiddenHeadwords: ['all day long'],
+    query: 'awful',
+    expectedHeadwordsInOrder: ['awful'],
+  },
+  {
+    label: 'bust my hump dealing with that awful chick / chick',
+    contextText: createContextThroughWord(WINDOWS.bustMyHumpAwfulChick, 'chick'),
+    expectedContextText: 'to bust my hump dealing with that awful chick',
+    forbiddenHeadwords: ['all day long'],
+    query: 'chick',
+    expectedHeadwordsInOrder: ['chick'],
+  },
+  {
+    label: 'bust my hump dealing with that awful chick / long',
+    contextText: createContextThroughWord(WINDOWS.bustMyHumpAwfulChick, 'long'),
+    expectedContextText: 'to bust my hump dealing with that awful chick all day long',
+    query: 'long',
+    expectedHeadwordsInOrder: ['long', 'all day long'],
   },
 ];
 
@@ -239,6 +296,10 @@ test('English dictionary search keeps single-word hints and context idiom hints'
         searchCase.expectedHeadwordsInOrder.includes(headword)
       ));
 
+      if (searchCase.expectedContextText) {
+        assert.equal(searchCase.contextText, searchCase.expectedContextText);
+      }
+
       assert.deepEqual(
         matchedExpectedHeadwords,
         searchCase.expectedHeadwordsInOrder,
@@ -248,6 +309,19 @@ test('English dictionary search keeps single-word hints and context idiom hints'
           `actual headwords: ${uniqueHeadwords.join(', ')}`,
         ].join('\n'),
       );
+
+      for (const forbiddenHeadword of searchCase.forbiddenHeadwords || []) {
+        assert.equal(
+          uniqueHeadwords.includes(forbiddenHeadword),
+          false,
+          [
+            `query: ${searchCase.query}`,
+            `context: ${searchCase.contextText}`,
+            `forbidden headword: ${forbiddenHeadword}`,
+            `actual headwords: ${uniqueHeadwords.join(', ')}`,
+          ].join('\n'),
+        );
+      }
     });
   }
 });
@@ -283,7 +357,11 @@ async function createTsvLookup(searchCases) {
 function collectWantedHeadwords(searchCases) {
   const wanted = new Set();
 
-  for (const { query, contextText } of searchCases) {
+  for (const {
+    forbiddenHeadwords = [],
+    query,
+    contextText,
+  } of searchCases) {
     for (const candidate of createEnglishDirectLookupCandidates(query)) {
       wanted.add(candidate);
     }
@@ -293,9 +371,35 @@ function collectWantedHeadwords(searchCases) {
         wanted.add(candidate);
       }
     }
+
+    for (const forbiddenHeadword of forbiddenHeadwords) {
+      wanted.add(normalizeDictionaryHeadword(forbiddenHeadword, 'english'));
+    }
   }
 
   return wanted;
+}
+
+function createContextThroughWord(text, word) {
+  const frame = {
+    caption: Array.from(text, (char, index) => ({
+      char,
+      id: String(index),
+      isTypeable: /[A-Za-z0-9]/.test(char),
+    })),
+    id: 'test-frame',
+    tags: [],
+  };
+  const wordStartIndex = text.indexOf(word);
+
+  assert.notEqual(wordStartIndex, -1, `test word was not found: ${word}`);
+
+  const targetCharIds = Array.from(
+    { length: word.length },
+    (_value, index) => String(wordStartIndex + index),
+  );
+
+  return createTypedHintContextText(frame, targetCharIds);
 }
 
 async function loadWantedDictionaryEntries(wantedHeadwords) {

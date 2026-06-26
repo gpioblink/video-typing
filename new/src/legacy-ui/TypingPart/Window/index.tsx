@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Style } from './style';
 import { Line } from '../Line';
+import { createTypedHintContextText } from '../../../lib/hintContext';
 import { isNetflixHostname } from '../../../lib/netflixSeek';
 import type { CaptionFrame, Char, ChineseTypingWord, ID, Tag, TagContent } from '../../../types';
 
@@ -26,6 +27,7 @@ interface Props {
 }
 
 interface ExplanationRequestOptions {
+  contextText?: string;
   silentIfMissing?: boolean;
   sourceText?: string;
 }
@@ -331,7 +333,12 @@ export function Window({
     });
     const explanationPromise = requestExplanation(
       pendingMistake.query,
-      { sourceText: pendingMistake.sourceText },
+      {
+        contextText: pendingMistake.sourceText
+          ? undefined
+          : createTypedHintContextText(frame, pendingMistake.targetCharIds),
+        sourceText: pendingMistake.sourceText,
+      },
     );
     hintedWordKeysRef.current.add(pendingMistake.targetCharIds.join(','));
     setPendingMistake(null);
@@ -496,6 +503,9 @@ export function Window({
           if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
             const wordKey = wordInfo?.targetCharIds.join(',');
             const sourceText = wordInfo ? getChineseSourceTextForWordInfo(frame, wordInfo) : undefined;
+            const contextText = wordInfo && !sourceText
+              ? createTypedHintContextText(frame, wordInfo.targetCharIds)
+              : undefined;
             const hadMistake = Boolean(
               wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds),
             );
@@ -533,7 +543,7 @@ export function Window({
               });
               explanationPromise = requestExplanation(
                 wordInfo.query,
-                { silentIfMissing: true, sourceText },
+                { contextText, silentIfMissing: true, sourceText },
               );
             }
           }
@@ -561,6 +571,7 @@ export function Window({
             const wordKey = wordInfo.targetCharIds.join(',');
 
             if (missCount >= 3 && !hintedWordKeysRef.current.has(wordKey)) {
+              const sourceText = getChineseSourceTextForWordInfo(frame, wordInfo);
               hintedWordKeysRef.current.add(wordKey);
               console.log('[video-typing][hint][typing-request]', {
                 frameId: frame.id,
@@ -570,7 +581,10 @@ export function Window({
                 silentIfMissing: false,
               });
               void requestExplanation(wordInfo.query, {
-                sourceText: getChineseSourceTextForWordInfo(frame, wordInfo),
+                contextText: sourceText
+                  ? undefined
+                  : createTypedHintContextText(frame, wordInfo.targetCharIds),
+                sourceText,
               });
             }
           }
