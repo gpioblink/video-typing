@@ -13,6 +13,7 @@ import {
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement, seekVideo } from '../lib/video';
+import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
   StoredFrameProgressData,
@@ -26,6 +27,7 @@ const LOOP_START_PADDING_SECONDS = 1;
 const LOOP_END_PADDING_SECONDS = 1;
 const SLOW_PLAYBACK_MISTAKE_THRESHOLD = 5;
 const SLOW_PLAYBACK_RATE = 0.5;
+const MAX_HINT_WORDS = 100;
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -56,6 +58,16 @@ export function OverlayApp({
   shadowRoot,
   targetId,
 }: Props) {
+  useEffect(() => {
+    console.log('[video-typing][hint][runtime-start]', {
+      surface: 'overlay',
+      buildId: HINT_DEBUG_BUILD_ID,
+      extensionId: chrome.runtime.id,
+      manifestVersion: chrome.runtime.getManifest().version,
+      pageUrl,
+    });
+  }, [pageUrl]);
+
   const subtitleCues = initialSubtitleCues;
   const subtitleFileName = initialSubtitleFileName;
   const typingFrames = initialTypingFrames;
@@ -65,6 +77,12 @@ export function OverlayApp({
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
+  const [pendingHintSearchCount, setPendingHintSearchCount] = useState(0);
+  const priorityHintKeysRef = useRef<Set<string>>(new Set());
+  const priorityHintRequestIdRef = useRef(0);
+  const hintRequestOrderRef = useRef(0);
+  const hintWordOrderRef = useRef<Map<string, number>>(new Map());
+  const hintFrameGenerationRef = useRef(0);
   const currentTimeRef = useRef(0);
   const loopRangeRef = useRef<{ start: number; end: number } | null>(null);
   const mistakeCountsRef = useRef<Record<string, number>>({});
@@ -291,8 +309,22 @@ export function OverlayApp({
     return typingProgress[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
   }, [activeFrame.id, typingProgress]);
 
+  // Keep this ref current during render so an old dictionary promise cannot
+  // write into the interval before the frame-change effect runs.
+  activeFrameIdRef.current = activeFrame.id;
+
   useEffect(() => {
-    activeFrameIdRef.current = activeFrame.id;
+    hintFrameGenerationRef.current += 1;
+    console.log('[video-typing][hint][frame-reset]', {
+      frameId: activeFrame.id,
+      generation: hintFrameGenerationRef.current,
+      cueText: activeCue?.text || '',
+    });
+    priorityHintKeysRef.current = new Set();
+    priorityHintRequestIdRef.current = 0;
+    hintRequestOrderRef.current = 0;
+    hintWordOrderRef.current = new Map();
+    setPendingHintSearchCount(0);
   }, [activeFrame.id]);
 
   const isActiveFrameComplete = useMemo(() => {
@@ -308,13 +340,30 @@ export function OverlayApp({
   }, [isActiveFrameComplete, loopCue, timelineCue]);
 
   useEffect(() => {
-    if (loopCue && isActiveFrameComplete && !isMistakeReasonPromptOpen) {
+    if (
+      loopCue &&
+      isActiveFrameComplete &&
+      !isMistakeReasonPromptOpen &&
+      pendingHintSearchCount === 0
+    ) {
       setLoopCue(null);
     }
-  }, [isActiveFrameComplete, isMistakeReasonPromptOpen, loopCue]);
+  }, [
+    isActiveFrameComplete,
+    isMistakeReasonPromptOpen,
+    loopCue,
+    pendingHintSearchCount,
+  ]);
 
   useEffect(() => {
-    if (!activeCue || (isActiveFrameComplete && !isMistakeReasonPromptOpen)) {
+    if (
+      !activeCue ||
+      (
+        isActiveFrameComplete &&
+        !isMistakeReasonPromptOpen &&
+        pendingHintSearchCount === 0
+      )
+    ) {
       loopRangeRef.current = null;
       restoreControlledPlaybackRate();
       return;
@@ -334,6 +383,7 @@ export function OverlayApp({
     applyMistakeSensitivePlaybackRate,
     isActiveFrameComplete,
     isMistakeReasonPromptOpen,
+    pendingHintSearchCount,
     restoreControlledPlaybackRate,
     subtitleCues,
   ]);
@@ -466,67 +516,179 @@ export function OverlayApp({
   ) => {
     const isChineseTypingMode = Boolean(typingFrames?.length);
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
+    const contextText = activeCue?.text || '';
+    const isPriorityHint = !options?.silentIfMissing;
+    const requestedFrameId = activeFrame.id;
+    const frameGeneration = hintFrameGenerationRef.current;
+    const requestOrder = hintRequestOrderRef.current + 1;
+    const requestId = `${requestedFrameId}:${frameGeneration}:${requestOrder}:${query}`;
+    const priorityRequestId = isPriorityHint
+      ? priorityHintRequestIdRef.current + 1
+      : priorityHintRequestIdRef.current;
+
+    hintRequestOrderRef.current = requestOrder;
+    console.log('[video-typing][hint][request-start]', {
+      requestId,
+      query,
+      displayQuery,
+      contextText,
+      requestedFrameId,
+      frameGeneration,
+      requestOrder,
+      isPriorityHint,
+      options,
+    });
+
+    if (isPriorityHint) {
+      priorityHintRequestIdRef.current = priorityRequestId;
+    }
+
+    const mergeSearchResult = (nextWords: DictionaryWord[]) => {
+      if (
+        activeFrameIdRef.current !== requestedFrameId ||
+        hintFrameGenerationRef.current !== frameGeneration
+      ) {
+        console.log('[video-typing][hint][result-dropped-frame-mismatch]', {
+          requestId,
+          requestedFrameId,
+          currentFrameId: activeFrameIdRef.current,
+          requestedGeneration: frameGeneration,
+          currentGeneration: hintFrameGenerationRef.current,
+          nextTitles: nextWords.map((word) => word.title),
+        });
+        return;
+      }
+
+      if (isPriorityHint && priorityHintRequestIdRef.current !== priorityRequestId) {
+        console.log('[video-typing][hint][result-dropped-priority-mismatch]', {
+          requestId,
+          priorityRequestId,
+          currentPriorityRequestId: priorityHintRequestIdRef.current,
+        });
+        return;
+      }
+
+      if (isPriorityHint) {
+        priorityHintKeysRef.current = new Set(nextWords.map(getHintWordKey));
+      }
+
+      for (const word of nextWords) {
+        hintWordOrderRef.current.set(getHintWordKey(word), requestOrder);
+      }
+
+      setHintWords((state) => {
+        const merged = mergeHintWords(
+          state,
+          nextWords,
+          priorityHintKeysRef.current,
+          hintWordOrderRef.current,
+        );
+        console.log('[video-typing][hint][result-merged]', {
+          requestId,
+          incomingTitles: nextWords.map((word) => word.title),
+          beforeTitles: state.map((word) => word.title),
+          afterTitles: merged.map((word) => word.title),
+        });
+        return merged;
+      });
+    };
+    const trackSearch = (search: Promise<void>) => {
+      setPendingHintSearchCount((count) => {
+        const nextCount = count + 1;
+        console.log('[video-typing][hint][pending-change]', {
+          requestId,
+          phase: 'start',
+          count: nextCount,
+        });
+        return nextCount;
+      });
+
+      return search.finally(() => {
+        if (
+          activeFrameIdRef.current !== requestedFrameId ||
+          hintFrameGenerationRef.current !== frameGeneration
+        ) {
+          console.log('[video-typing][hint][pending-finish-ignored-frame-mismatch]', {
+            requestId,
+            requestedFrameId,
+            currentFrameId: activeFrameIdRef.current,
+          });
+          return;
+        }
+
+        setPendingHintSearchCount((count) => {
+          const nextCount = Math.max(0, count - 1);
+          console.log('[video-typing][hint][pending-change]', {
+            requestId,
+            phase: 'finish',
+            count: nextCount,
+          });
+          return nextCount;
+        });
+      });
+    };
 
     if (isChineseTypingMode) {
-      void searchExtensionChineseDictionary(displayQuery, activeCue?.text || '').then((entries) => {
+      return trackSearch(searchExtensionChineseDictionary(displayQuery, contextText, requestId).then((entries) => {
+        console.log('[video-typing][hint][search-resolved]', {
+          requestId,
+          entryHeadwords: entries.map((entry) => entry.headword),
+        });
         if (entries.length === 0 && options?.silentIfMissing) {
+          console.log('[video-typing][hint][empty-result-suppressed]', { requestId });
           return;
         }
 
         const nextWords: DictionaryWord[] = entries.length > 0
-          ? entries.map((entry) => ({
-            title: entry.headword,
-            content: entry.body,
-            dictionaryEntryKey: entry.key,
-          }))
+          ? createDictionaryHintWords(entries)
           : [{
             title: displayQuery,
             content: 'Dictionary entry was not found.',
           }];
 
-        setHintWords((state) => mergeHintWords(state, nextWords));
+        mergeSearchResult(nextWords);
       }).catch(() => {
         if (options?.silentIfMissing) {
           return;
         }
 
-        setHintWords((state) => mergeHintWords(state, [{
+        mergeSearchResult([{
           title: displayQuery,
           content: 'Dictionary search failed.',
-        }]));
-      });
-
-      return;
+        }]);
+      }));
     }
 
-    void searchExtensionDictionary(query, activeCue?.text || '').then((entries) => {
+    return trackSearch(searchExtensionDictionary(query, contextText, requestId).then((entries) => {
+      console.log('[video-typing][hint][search-resolved]', {
+        requestId,
+        entryHeadwords: entries.map((entry) => entry.headword),
+      });
       if (entries.length === 0 && options?.silentIfMissing) {
+        console.log('[video-typing][hint][empty-result-suppressed]', { requestId });
         return;
       }
 
       const nextWords: DictionaryWord[] = entries.length > 0
-        ? entries.map((entry) => ({
-          title: entry.headword,
-          content: entry.body,
-          dictionaryEntryKey: entry.key,
-        }))
+        ? createDictionaryHintWords(entries)
         : [{
           title: displayQuery,
           content: 'Dictionary entry was not found.',
         }];
 
-      setHintWords((state) => mergeHintWords(state, nextWords));
-    }).catch(() => {
+      mergeSearchResult(nextWords);
+    }).catch((error) => {
+      console.log('[video-typing][hint][search-error]', { requestId, error });
       if (options?.silentIfMissing) {
         return;
       }
 
-      setHintWords((state) => mergeHintWords(state, [{
-          title: displayQuery,
-          content: 'Dictionary search failed.',
-        }]));
-    });
-  }, [activeCue?.text, typingFrames?.length]);
+      mergeSearchResult([{
+        title: displayQuery,
+        content: 'Dictionary search failed.',
+      }]);
+    }));
+  }, [activeCue?.text, activeFrame.id, typingFrames?.length]);
 
   return (
     <CacheProvider value={cache}>
@@ -601,17 +763,64 @@ const overlayStyle: React.CSSProperties = {
   pointerEvents: 'none',
 };
 
-function mergeHintWords(state: DictionaryWord[], nextWords: DictionaryWord[]) {
-  const existingKeys = new Set(nextWords.map((word) => `${word.title}\u0000${word.content}`));
+function getHintWordKey(word: DictionaryWord) {
+  return word.dictionaryEntryKey || `${word.title}\u0000${word.content}`;
+}
+
+function createDictionaryHintWords(
+  entries: Array<{
+    normalizedHeadword: string;
+    headword: string;
+    body: string;
+  }>,
+): DictionaryWord[] {
+  const groups = new Map<string, {
+    title: string;
+    bodies: string[];
+  }>();
+
+  for (const entry of entries) {
+    const key = entry.normalizedHeadword;
+    const group = groups.get(key);
+
+    if (group) {
+      group.bodies.push(entry.body);
+      continue;
+    }
+
+    groups.set(key, {
+      title: entry.headword,
+      bodies: [entry.body],
+    });
+  }
+
+  return Array.from(groups, ([normalizedHeadword, group]) => ({
+    title: group.title,
+    content: group.bodies.join('\n\n'),
+    dictionaryEntryKey: `headword:${normalizedHeadword}`,
+  }));
+}
+
+function mergeHintWords(
+  state: DictionaryWord[],
+  nextWords: DictionaryWord[],
+  _priorityKeys = new Set<string>(),
+  wordOrder = new Map<string, number>(),
+) {
+  const existingKeys = new Set(nextWords.map(getHintWordKey));
   const existingEntryKeys = new Set(nextWords.flatMap((word) => (
     word.dictionaryEntryKey ? [word.dictionaryEntryKey] : []
   )));
   const filtered = state.filter((word) => (
-    !existingKeys.has(`${word.title}\u0000${word.content}`) &&
+    !existingKeys.has(getHintWordKey(word)) &&
     !(word.dictionaryEntryKey && existingEntryKeys.has(word.dictionaryEntryKey))
   ));
-
-  return [...nextWords, ...filtered].slice(0, 10);
+  const merged = [...nextWords, ...filtered];
+  const compareByRequestOrder = (left: DictionaryWord, right: DictionaryWord) => (
+    (wordOrder.get(getHintWordKey(right)) || 0) -
+    (wordOrder.get(getHintWordKey(left)) || 0)
+  );
+  return merged.sort(compareByRequestOrder).slice(0, MAX_HINT_WORDS);
 }
 
 function areTagsEqual(left: Tag[], right: Tag[]) {

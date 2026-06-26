@@ -1,8 +1,16 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { searchChineseDictionary, searchDictionary } from '../src/lib/dictionary';
+import { HINT_DEBUG_BUILD_ID } from '../src/lib/hintDebug';
 import { isNetflixHostname } from '../src/lib/netflixSeek';
 
 export default defineBackground(() => {
+  console.log('[video-typing][hint][runtime-start]', {
+    surface: 'background',
+    buildId: HINT_DEBUG_BUILD_ID,
+    extensionId: chrome.runtime.id,
+    manifestVersion: chrome.runtime.getManifest().version,
+  });
+
   chrome.action.onClicked.addListener(async (tab: any) => {
     if (!tab.id || !tab.url || tab.url.startsWith('chrome://')) {
       return;
@@ -24,17 +32,34 @@ export default defineBackground(() => {
 
   chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: any) => {
     if (message?.type === 'videoTypingDictionarySearch') {
-      void searchDictionary(String(message.query || ''), 'english', String(message.contextText || ''))
-        .then((entries) => sendResponse({ entries }))
-        .catch(() => sendResponse({ entries: [] }));
+      const requestId = String(message.requestId || '');
+      const query = String(message.query || '');
+      const contextText = String(message.contextText || '');
+      console.log('[video-typing][hint][background-receive]', { requestId, query, contextText });
+      void searchDictionary(query, 'english', contextText, requestId)
+        .then((entries) => {
+          console.log('[video-typing][hint][background-result]', {
+            requestId,
+            headwords: entries.map((entry) => entry.headword),
+          });
+          sendResponse({ entries });
+        })
+        .catch((error) => {
+          console.log('[video-typing][hint][background-error]', { requestId, error });
+          sendResponse({ entries: [] });
+        });
 
       return true;
     }
 
     if (message?.type === 'videoTypingChineseDictionarySearch') {
+      const requestId = String(message.requestId || '');
       void searchChineseDictionary(String(message.query || ''), String(message.contextText || ''))
         .then((entries) => sendResponse({ entries }))
-        .catch(() => sendResponse({ entries: [] }));
+        .catch((error) => {
+          console.log('[video-typing][hint][background-error]', { requestId, error, kind: 'chinese' });
+          sendResponse({ entries: [] });
+        });
 
       return true;
     }

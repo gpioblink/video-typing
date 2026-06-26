@@ -16,7 +16,7 @@ interface Props {
   frame: CaptionFrame;
   initialFinishedCharIds: ID[];
   sendCompleted: () => void;
-  requestExplanation: (query: string, options?: ExplanationRequestOptions) => void;
+  requestExplanation: (query: string, options?: ExplanationRequestOptions) => Promise<void>;
   onMistakeInput?: () => void;
   onMistakeReasonPromptOpen?: () => void;
   onMistakeReasonPromptClose?: () => void;
@@ -97,19 +97,38 @@ function getWordInfo(frame: CaptionFrame, currentCharId: ID): WordInfo | null {
   }
 
   let wordStartIndex = charIndex;
-  while (wordStartIndex > 0 && frame.caption[wordStartIndex - 1]?.isTypeable) {
+  while (wordStartIndex > 0 && isEnglishWordPart(frame.caption, wordStartIndex - 1)) {
     wordStartIndex -= 1;
   }
 
   let wordEndIndex = charIndex;
-  while (wordEndIndex + 1 < frame.caption.length && frame.caption[wordEndIndex + 1]?.isTypeable) {
+  while (
+    wordEndIndex + 1 < frame.caption.length &&
+    isEnglishWordPart(frame.caption, wordEndIndex + 1)
+  ) {
     wordEndIndex += 1;
   }
 
+  const wordChars = frame.caption.slice(wordStartIndex, wordEndIndex + 1);
+
   return {
-    targetCharIds: frame.caption.slice(wordStartIndex, wordEndIndex + 1).map((char) => char.id),
-    query: charsToString(frame.caption.slice(wordStartIndex, wordEndIndex + 1)),
+    targetCharIds: wordChars.filter((char) => char.isTypeable).map((char) => char.id),
+    query: charsToString(wordChars).replace(/’/g, "'"),
   };
+}
+
+function isEnglishWordPart(caption: Char[], index: number) {
+  const char = caption[index];
+
+  if (char?.isTypeable) {
+    return true;
+  }
+
+  if (!char || !/['’-]/.test(char.char)) {
+    return false;
+  }
+
+  return Boolean(caption[index - 1]?.isTypeable && caption[index + 1]?.isTypeable);
 }
 
 function getChineseSourceTextForWordInfo(
@@ -283,7 +302,7 @@ export function Window({
     return splitGameCharsIntoRows(game.gameChars, columnsPerLine);
   }, [columnsPerLine, game.gameChars]);
 
-  const selectMistakeReason = (content: TagContent) => {
+  const selectMistakeReason = async (content: TagContent) => {
     if (!pendingMistake) {
       return;
     }
@@ -303,12 +322,23 @@ export function Window({
       return nextGame;
     });
 
-    requestExplanation(pendingMistake.query, { sourceText: pendingMistake.sourceText });
+    console.log('[video-typing][hint][typing-request]', {
+      frameId: frame.id,
+      trigger: 'mistake-reason-selected',
+      query: pendingMistake.query,
+      reason: content,
+      shouldCompleteAfterSelection: pendingMistake.shouldCompleteAfterSelection,
+    });
+    const explanationPromise = requestExplanation(
+      pendingMistake.query,
+      { sourceText: pendingMistake.sourceText },
+    );
     hintedWordKeysRef.current.add(pendingMistake.targetCharIds.join(','));
     setPendingMistake(null);
     onMistakeReasonPromptClose?.();
 
     if (pendingMistake.shouldCompleteAfterSelection) {
+      await explanationPromise;
       sendCompleted();
       return;
     }
@@ -454,6 +484,7 @@ export function Window({
         let nextTags = state.tags;
 
         if (isCorrect) {
+          let explanationPromise: Promise<void> | null = null;
           const wordInfo = getWordInfo(frame, nextChars[inputIndex].char.id);
           nextChars[inputIndex] = {
             ...nextChars[inputIndex],
@@ -465,8 +496,21 @@ export function Window({
           if (nextWaitIndex === -1 || inputIndex + 1 !== nextWaitIndex) {
             const wordKey = wordInfo?.targetCharIds.join(',');
             const sourceText = wordInfo ? getChineseSourceTextForWordInfo(frame, wordInfo) : undefined;
+            const hadMistake = Boolean(
+              wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds),
+            );
 
-            if (wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds)) {
+            console.log('[video-typing][hint][word-completed]', {
+              frameId: frame.id,
+              query: wordInfo?.query,
+              wordKey,
+              isLastWord: nextWaitIndex === -1,
+              hadMistake,
+              autoHintEligible: wordInfo ? shouldRequestAutoHint(wordInfo.query) : false,
+              alreadyRequested: Boolean(wordKey && hintedWordKeysRef.current.has(wordKey)),
+            });
+
+            if (wordInfo && hadMistake) {
               setPendingMistake({
                 ...wordInfo,
                 sourceText,
@@ -480,7 +524,17 @@ export function Window({
               !hintedWordKeysRef.current.has(wordKey)
             ) {
               hintedWordKeysRef.current.add(wordKey);
-              requestExplanation(wordInfo.query, { silentIfMissing: true, sourceText });
+              console.log('[video-typing][hint][typing-request]', {
+                frameId: frame.id,
+                trigger: 'word-completed',
+                query: wordInfo.query,
+                isLastWord: nextWaitIndex === -1,
+                silentIfMissing: true,
+              });
+              explanationPromise = requestExplanation(
+                wordInfo.query,
+                { silentIfMissing: true, sourceText },
+              );
             }
           }
 
@@ -490,7 +544,11 @@ export function Window({
               status: 'available',
             };
           } else if (!(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
-            sendCompleted();
+            if (explanationPromise) {
+              void explanationPromise.finally(sendCompleted);
+            } else {
+              sendCompleted();
+            }
           }
         } else {
           onMistakeInput?.();
@@ -504,7 +562,14 @@ export function Window({
 
             if (missCount >= 3 && !hintedWordKeysRef.current.has(wordKey)) {
               hintedWordKeysRef.current.add(wordKey);
-              requestExplanation(wordInfo.query, {
+              console.log('[video-typing][hint][typing-request]', {
+                frameId: frame.id,
+                trigger: 'third-mistake',
+                query: wordInfo.query,
+                missCount,
+                silentIfMissing: false,
+              });
+              void requestExplanation(wordInfo.query, {
                 sourceText: getChineseSourceTextForWordInfo(frame, wordInfo),
               });
             }
