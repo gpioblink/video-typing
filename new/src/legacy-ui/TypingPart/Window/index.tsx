@@ -243,6 +243,7 @@ export function Window({
   const gameRef = useRef(game);
   const keyboardLogRef = useRef(keyboardLog);
   const keyboardRef = useRef<HTMLDivElement>(null);
+  const pendingMistakeExplanationPromiseRef = useRef<Promise<void> | null>(null);
   const hintedWordKeysRef = useRef<Set<string>>(new Set());
   const [columnsPerLine, setColumnsPerLine] = useState(DEFAULT_COLUMNS_PER_LINE);
   const isNetflixPage = useMemo(() => isNetflixHostname(window.location.hostname), []);
@@ -253,6 +254,7 @@ export function Window({
     setGame(nextGame);
     keyboardLogRef.current = [];
     setKeyboardLog([]);
+    pendingMistakeExplanationPromiseRef.current = null;
     hintedWordKeysRef.current = new Set();
     setPendingMistake(null);
   }, [frame.id]);
@@ -325,23 +327,24 @@ export function Window({
       return nextGame;
     });
 
-    console.log('[video-typing][hint][typing-request]', {
+    console.log('[video-typing][hint][mistake-reason-selected]', {
       frameId: frame.id,
-      trigger: 'mistake-reason-selected',
       query: pendingMistake.query,
       reason: content,
       shouldCompleteAfterSelection: pendingMistake.shouldCompleteAfterSelection,
+      hintAlreadyRequested: Boolean(pendingMistakeExplanationPromiseRef.current),
     });
-    const explanationPromise = requestExplanation(
-      pendingMistake.query,
-      {
-        contextText: pendingMistake.sourceText
-          ? undefined
-          : createTypedHintContextText(frame, pendingMistake.targetCharIds),
-        sourceText: pendingMistake.sourceText,
-      },
-    );
-    hintedWordKeysRef.current.add(pendingMistake.targetCharIds.join(','));
+    const explanationPromise = pendingMistakeExplanationPromiseRef.current
+      || requestExplanation(
+        pendingMistake.query,
+        {
+          contextText: pendingMistake.sourceText
+            ? undefined
+            : createTypedHintContextText(frame, pendingMistake.targetCharIds),
+          sourceText: pendingMistake.sourceText,
+        },
+      );
+    pendingMistakeExplanationPromiseRef.current = null;
     setPendingMistake(null);
     onMistakeReasonPromptClose?.();
 
@@ -522,6 +525,23 @@ export function Window({
             });
 
             if (wordInfo && hadMistake) {
+              if (wordKey && !hintedWordKeysRef.current.has(wordKey)) {
+                hintedWordKeysRef.current.add(wordKey);
+                console.log('[video-typing][hint][typing-request]', {
+                  frameId: frame.id,
+                  trigger: 'mistake-reason-prompt-open',
+                  query: wordInfo.query,
+                  isLastWord: nextWaitIndex === -1,
+                  silentIfMissing: false,
+                });
+                pendingMistakeExplanationPromiseRef.current = requestExplanation(
+                  wordInfo.query,
+                  { contextText, sourceText },
+                );
+              } else {
+                pendingMistakeExplanationPromiseRef.current = Promise.resolve();
+              }
+
               setPendingMistake({
                 ...wordInfo,
                 sourceText,
