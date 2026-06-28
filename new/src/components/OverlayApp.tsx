@@ -29,6 +29,7 @@ const LOOP_END_PADDING_SECONDS = 1;
 const SLOW_PLAYBACK_MISTAKE_THRESHOLD = 5;
 const SLOW_PLAYBACK_RATE = 0.5;
 const MAX_HINT_WORDS = 100;
+const TYPE_REVIEW_PRAISE_WORDS = ['Cool!', 'Awesome!', 'Nice!', 'Great!', 'Perfect!'];
 
 interface Props {
   initialSubtitleCues: SubtitleCue[];
@@ -85,6 +86,7 @@ export function OverlayApp({
   const [isUnknownHintSelectionActive, setIsUnknownHintSelectionActive] = useState(false);
   const [pendingHintSearchCount, setPendingHintSearchCount] = useState(0);
   const [activeFrameResetRevision, setActiveFrameResetRevision] = useState(0);
+  const [praise, setPraise] = useState<{ id: number; text: string } | null>(null);
   const priorityHintKeysRef = useRef<Set<string>>(new Set());
   const priorityHintRequestIdRef = useRef(0);
   const hintRequestOrderRef = useRef(0);
@@ -101,6 +103,7 @@ export function OverlayApp({
   } | null>(null);
   const shouldResumeAfterMistakeReasonRef = useRef(false);
   const unknownHintSelectionHandlerRef = useRef<((word: DictionaryWord) => void) | null>(null);
+  const praiseTimerRef = useRef<number | null>(null);
 
   const cache = useMemo(() => {
     return createCache({
@@ -545,6 +548,28 @@ export function OverlayApp({
     void video.play().catch(() => undefined);
   }, [targetId]);
 
+  const handleTypeReviewMistakeTagsCleared = useCallback(() => {
+    const text = TYPE_REVIEW_PRAISE_WORDS[Math.floor(Math.random() * TYPE_REVIEW_PRAISE_WORDS.length)];
+
+    if (praiseTimerRef.current !== null) {
+      window.clearTimeout(praiseTimerRef.current);
+    }
+
+    setPraise({ id: Date.now(), text });
+    praiseTimerRef.current = window.setTimeout(() => {
+      setPraise(null);
+      praiseTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (praiseTimerRef.current !== null) {
+        window.clearTimeout(praiseTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
       const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
@@ -866,6 +891,7 @@ export function OverlayApp({
             onUnknownHintSelectionHandlerChange={(handler) => {
               unknownHintSelectionHandlerRef.current = handler;
             }}
+            onTypeReviewMistakeTagsCleared={handleTypeReviewMistakeTagsCleared}
             typeReviewMode={typeReviewMode}
           />
         </DraggablePanel>
@@ -911,8 +937,37 @@ export function OverlayApp({
             fileName={displaySubtitleFileName || subtitleFileName}
           />
         </DraggablePanel>
+        {praise ? <PraiseOverlay key={praise.id} text={praise.text} /> : null}
       </div>
     </CacheProvider>
+  );
+}
+
+function PraiseOverlay({ text }: { text: string }) {
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(() => setActive(true));
+    const hideTimer = window.setTimeout(() => setActive(false), 760);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(hideTimer);
+    };
+  }, []);
+
+  return (
+    <div style={praiseOverlayStyle} aria-hidden="true">
+      <div
+        style={{
+          ...praiseTextStyle,
+          opacity: active ? 1 : 0,
+          transform: active ? 'translateY(0) scale(1)' : 'translateY(18px) scale(0.82)',
+        }}
+      >
+        {text}
+      </div>
+    </div>
   );
 }
 
@@ -921,6 +976,32 @@ const overlayStyle: React.CSSProperties = {
   inset: 0,
   zIndex: 2147483646,
   pointerEvents: 'none',
+};
+
+const praiseOverlayStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  display: 'grid',
+  placeItems: 'center',
+  pointerEvents: 'none',
+  zIndex: 2147483647,
+};
+
+const praiseTextStyle: React.CSSProperties = {
+  maxWidth: 'calc(100vw - 32px)',
+  padding: '18px 28px',
+  borderRadius: '999px',
+  background: 'rgba(216, 239, 229, 0.94)',
+  color: '#102016',
+  fontSize: '72px',
+  fontWeight: 900,
+  lineHeight: 1,
+  letterSpacing: 0,
+  textShadow: '0 2px 0 rgba(255, 255, 255, 0.36)',
+  boxShadow: '0 22px 70px rgba(0, 0, 0, 0.34)',
+  transition: 'opacity 220ms ease, transform 360ms cubic-bezier(0.2, 1.4, 0.35, 1)',
+  overflowWrap: 'break-word',
+  textAlign: 'center',
 };
 
 function getHintWordKey(word: DictionaryWord) {

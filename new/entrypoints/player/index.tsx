@@ -508,6 +508,9 @@ function PlayerApp() {
                     URL.revokeObjectURL(nativeAudioUrl);
                     setNativeAudioUrl('');
                   }
+                  setActiveSession(null);
+                  setReviewSession(null);
+                  setRouteSessionId(null);
                   window.location.hash = '';
                 }}
               >

@@ -33,6 +33,7 @@ interface Props {
   hintWords?: DictionaryWord[];
   onUnknownHintSelectionActiveChange?: (active: boolean) => void;
   onUnknownHintSelectionHandlerChange?: (handler: ((word: DictionaryWord) => void) | null) => void;
+  onTypeReviewMistakeTagsCleared?: () => void;
   typeReviewMode?: boolean;
 }
 
@@ -263,6 +264,7 @@ export function Window({
   hintWords = [],
   onUnknownHintSelectionActiveChange,
   onUnknownHintSelectionHandlerChange,
+  onTypeReviewMistakeTagsCleared,
   typeReviewMode = false,
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
@@ -805,7 +807,13 @@ export function Window({
             };
           } else if (!(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
             if (typeReviewMode && nextKeyboardLog.every((log) => log.isCorrect)) {
-              nextTags = removeTypeReviewMistakeTags(nextTags);
+              const clearedTags = removeTypeReviewMistakeTags(nextTags);
+
+              if (clearedTags.length !== nextTags.length) {
+                onTypeReviewMistakeTagsCleared?.();
+              }
+
+              nextTags = clearedTags;
             }
 
             if (explanationPromise) {
