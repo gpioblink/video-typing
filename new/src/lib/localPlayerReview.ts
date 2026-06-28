@@ -22,7 +22,7 @@ export interface UnknownWordCsvRow {
   meaning: string;
 }
 
-const TYPE_REVIEW_TAG_CONTENTS = new Set(['ignorance', 'unaudible']);
+const TYPE_REVIEW_TAG_CONTENTS = new Set(['ignorance', 'unaudible', 'spelling']);
 
 interface ReviewSource {
   subtitleCues: SubtitleCue[];

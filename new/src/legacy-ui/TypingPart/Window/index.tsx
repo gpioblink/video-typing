@@ -66,7 +66,7 @@ const MISTAKE_REASON_KEYS: Record<string, TagContent> = {
   j: 'unaudible',
   m: 'spelling',
 };
-const TYPE_REVIEW_TAG_CONTENTS = new Set<TagContent>(['ignorance', 'unaudible']);
+const TYPE_REVIEW_TAG_CONTENTS = new Set<TagContent>(['ignorance', 'unaudible', 'spelling']);
 
 interface WordInfo {
   targetCharIds: ID[];
@@ -240,8 +240,46 @@ function removeOverlappingMistakeTags(tags: Tag[], targetCharIds: ID[]) {
   return tags.filter((tag) => !tag.pastedCharIds.some((charId) => targetCharIdSet.has(charId)));
 }
 
-function removeTypeReviewMistakeTags(tags: Tag[]) {
-  return tags.filter((tag) => !TYPE_REVIEW_TAG_CONTENTS.has(tag.content));
+function removeCompletedTypeReviewMistakeTags(
+  tags: Tag[],
+  typeableCharIds: ID[],
+  finishedCharIds: ID[],
+  keyboardLog: Array<{ currentCharId: ID; isCorrect: boolean }>,
+) {
+  const typeableCharIdSet = new Set(typeableCharIds);
+  const finishedCharIdSet = new Set(finishedCharIds);
+  const mistakenCharIdSet = new Set(
+    keyboardLog
+      .filter((log) => !log.isCorrect)
+      .map((log) => log.currentCharId),
+  );
+  let removedCount = 0;
+  const tagsWithoutCompletedMistakes = tags.filter((tag) => {
+    if (!TYPE_REVIEW_TAG_CONTENTS.has(tag.content)) {
+      return true;
+    }
+
+    const tagTypeableCharIds = tag.pastedCharIds.filter((charId) => typeableCharIdSet.has(charId));
+
+    if (tagTypeableCharIds.length === 0) {
+      return true;
+    }
+
+    const isTagComplete = tagTypeableCharIds.every((charId) => finishedCharIdSet.has(charId));
+    const hasMistakeInTag = tagTypeableCharIds.some((charId) => mistakenCharIdSet.has(charId));
+
+    if (isTagComplete && !hasMistakeInTag) {
+      removedCount += 1;
+      return false;
+    }
+
+    return true;
+  });
+
+  return {
+    tags: tagsWithoutCompletedMistakes,
+    removedCount,
+  };
 }
 
 function stopKeyboardEventPropagation(event: React.KeyboardEvent) {
@@ -805,17 +843,27 @@ export function Window({
               ...nextChars[nextWaitIndex],
               status: 'available',
             };
-          } else if (!(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
-            if (typeReviewMode && nextKeyboardLog.every((log) => log.isCorrect)) {
-              const clearedTags = removeTypeReviewMistakeTags(nextTags);
+          }
 
-              if (clearedTags.length !== nextTags.length) {
+          if (typeReviewMode) {
+            const clearedResult = removeCompletedTypeReviewMistakeTags(
+              nextTags,
+              frame.caption.filter((char) => char.isTypeable).map((char) => char.id),
+              nextChars
+                .filter((char) => char.char.isTypeable && char.status === 'finished')
+                .map((char) => char.char.id),
+              nextKeyboardLog,
+            );
+
+            if (clearedResult.removedCount > 0) {
+              nextTags = clearedResult.tags;
+              for (let index = 0; index < clearedResult.removedCount; index += 1) {
                 onTypeReviewMistakeTagsCleared?.();
               }
-
-              nextTags = clearedTags;
             }
+          }
 
+          if (nextWaitIndex === -1 && !(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
             if (explanationPromise) {
               void explanationPromise.finally(sendCompleted);
             } else {

@@ -275,7 +275,7 @@ test('unknown word CSV rows can be created from stored external subtitle data', 
   }]);
 });
 
-test('type review frames include only cues with ignorance or unaudible tags and reset typing progress', () => {
+test('type review frames include cues with ignorance, unaudible, or spelling tags and reset typing progress', () => {
   const cues = [
     { start: 0, end: 1, text: 'I missed this word.' },
     { start: 2, end: 3, text: 'I typed this cleanly.' },
@@ -319,6 +319,7 @@ test('type review frames include only cues with ignorance or unaudible tags and 
   assert.deepEqual(reviewFrames.map((reviewFrame) => reviewFrame.cue.text), [
     'I missed this word.',
     'I could not hear this.',
+    'Only a typo here.',
   ]);
   assert.deepEqual(reviewProgress[frames[0].id], {
     finishedCharIds: [],
@@ -328,6 +329,11 @@ test('type review frames include only cues with ignorance or unaudible tags and 
   assert.deepEqual(reviewProgress[frames[2].id], {
     finishedCharIds: [],
     tags: [{ id: 'tag-2', pastedCharIds: [frames[2].caption[2].id], content: 'unaudible' }],
+    updatedAt: undefined,
+  });
+  assert.deepEqual(reviewProgress[frames[3].id], {
+    finishedCharIds: [],
+    tags: [{ id: 'tag-3', pastedCharIds: [frames[3].caption[5].id], content: 'spelling' }],
     updatedAt: undefined,
   });
 });
