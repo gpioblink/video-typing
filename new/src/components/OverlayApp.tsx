@@ -38,6 +38,7 @@ interface Props {
   displaySubtitleCues?: SubtitleCue[];
   displaySubtitleFileName?: string;
   showDebugPanel?: boolean;
+  typeReviewMode?: boolean;
   onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
   pageUrl: string;
@@ -53,6 +54,7 @@ export function OverlayApp({
   displaySubtitleCues,
   displaySubtitleFileName,
   showDebugPanel = true,
+  typeReviewMode = false,
   onFrameMistake,
   onFrameCompleted,
   pageUrl,
@@ -389,8 +391,10 @@ export function OverlayApp({
       return;
     }
 
-    const loopStart = Math.max(0, activeCue.start - LOOP_START_PADDING_SECONDS);
-    const loopEnd = activeCue.end + LOOP_END_PADDING_SECONDS;
+    const loopPadding = typeReviewMode ? 0 : LOOP_START_PADDING_SECONDS;
+    const loopEndPadding = typeReviewMode ? 0 : LOOP_END_PADDING_SECONDS;
+    const loopStart = Math.max(0, activeCue.start - loopPadding);
+    const loopEnd = activeCue.end + loopEndPadding;
 
     loopRangeRef.current = {
       start: loopStart,
@@ -406,6 +410,40 @@ export function OverlayApp({
     pendingHintSearchCount,
     restoreControlledPlaybackRate,
     subtitleCues,
+    typeReviewMode,
+  ]);
+
+  useEffect(() => {
+    if (!typeReviewMode || loopCue || timelineCue || subtitleCues.length === 0) {
+      return;
+    }
+
+    const video = getVideoElement(targetId);
+
+    if (!video) {
+      return;
+    }
+
+    const nextCue = subtitleCues.find((cue) => cue.start > currentTime + 0.05);
+
+    if (nextCue) {
+      seekVideo(targetId, nextCue.start);
+      setCurrentTime(nextCue.start);
+      return;
+    }
+
+    const lastCue = subtitleCues[subtitleCues.length - 1];
+
+    if (lastCue && currentTime >= lastCue.end) {
+      video.pause();
+    }
+  }, [
+    currentTime,
+    loopCue,
+    subtitleCues,
+    targetId,
+    timelineCue,
+    typeReviewMode,
   ]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
@@ -825,6 +863,7 @@ export function OverlayApp({
             onUnknownHintSelectionHandlerChange={(handler) => {
               unknownHintSelectionHandlerRef.current = handler;
             }}
+            typeReviewMode={typeReviewMode}
           />
         </DraggablePanel>
         <DraggablePanel

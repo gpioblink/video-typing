@@ -33,6 +33,7 @@ interface Props {
   hintWords?: DictionaryWord[];
   onUnknownHintSelectionActiveChange?: (active: boolean) => void;
   onUnknownHintSelectionHandlerChange?: (handler: ((word: DictionaryWord) => void) | null) => void;
+  typeReviewMode?: boolean;
 }
 
 interface ExplanationRequestOptions {
@@ -64,6 +65,7 @@ const MISTAKE_REASON_KEYS: Record<string, TagContent> = {
   j: 'unaudible',
   m: 'spelling',
 };
+const TYPE_REVIEW_TAG_CONTENTS = new Set<TagContent>(['ignorance', 'unaudible']);
 
 interface WordInfo {
   targetCharIds: ID[];
@@ -231,6 +233,16 @@ function getNextTagContent(content: TagContent): TagContent | null {
   }
 }
 
+function removeOverlappingMistakeTags(tags: Tag[], targetCharIds: ID[]) {
+  const targetCharIdSet = new Set(targetCharIds);
+
+  return tags.filter((tag) => !tag.pastedCharIds.some((charId) => targetCharIdSet.has(charId)));
+}
+
+function removeTypeReviewMistakeTags(tags: Tag[]) {
+  return tags.filter((tag) => !TYPE_REVIEW_TAG_CONTENTS.has(tag.content));
+}
+
 function stopKeyboardEventPropagation(event: React.KeyboardEvent) {
   event.stopPropagation();
   event.nativeEvent.stopImmediatePropagation();
@@ -251,6 +263,7 @@ export function Window({
   hintWords = [],
   onUnknownHintSelectionActiveChange,
   onUnknownHintSelectionHandlerChange,
+  typeReviewMode = false,
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
@@ -336,10 +349,15 @@ export function Window({
     };
 
     setGame((state) => {
-      const nextTags = [
-        ...removeOverlappingLowerPriorityMistakeTags(state.tags, resolvedTarget.targetCharIds),
-        nextTag,
-      ];
+      const nextTags = typeReviewMode
+        ? [
+          ...removeOverlappingMistakeTags(state.tags, resolvedTarget.targetCharIds),
+          nextTag,
+        ]
+        : [
+          ...removeOverlappingLowerPriorityMistakeTags(state.tags, resolvedTarget.targetCharIds),
+          nextTag,
+        ];
       const nextGame = {
         ...state,
         tags: nextTags,
@@ -379,6 +397,7 @@ export function Window({
     onUnknownHintSelectionHandlerChange,
     pendingMistake,
     sendCompleted,
+    typeReviewMode,
   ]);
 
   useEffect(() => {
@@ -434,9 +453,15 @@ export function Window({
     };
 
     setGame((state) => {
+      const nextTags = typeReviewMode
+        ? [
+          ...removeOverlappingMistakeTags(state.tags, pendingMistake.targetCharIds),
+          nextTag,
+        ]
+        : [...state.tags, nextTag];
       const nextGame = {
         ...state,
-        tags: [...state.tags, nextTag],
+        tags: nextTags,
       };
       gameRef.current = nextGame;
       return nextGame;
@@ -476,9 +501,15 @@ export function Window({
     };
 
     setGame((state) => {
+      const nextTags = typeReviewMode
+        ? [
+          ...removeOverlappingMistakeTags(state.tags, pendingMistake.targetCharIds),
+          nextTag,
+        ]
+        : [...state.tags, nextTag];
       const nextGame = {
         ...state,
-        tags: [...state.tags, nextTag],
+        tags: nextTags,
       };
       gameRef.current = nextGame;
       return nextGame;
@@ -498,6 +529,7 @@ export function Window({
     onUnknownHintSelectionActiveChange,
     onUnknownHintSelectionHandlerChange,
     pendingMistake,
+    typeReviewMode,
   ]);
 
   const beginClickedUnknownHintSelection = (wordInfo: WordInfo) => {
@@ -772,6 +804,10 @@ export function Window({
               status: 'available',
             };
           } else if (!(wordInfo && hasMistakeInWord(nextKeyboardLog, wordInfo.targetCharIds))) {
+            if (typeReviewMode && nextKeyboardLog.every((log) => log.isCorrect)) {
+              nextTags = removeTypeReviewMistakeTags(nextTags);
+            }
+
             if (explanationPromise) {
               void explanationPromise.finally(sendCompleted);
             } else {

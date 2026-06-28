@@ -1,6 +1,7 @@
 import type {
   StoredLocalPlayerSession,
   StoredSubtitleData,
+  StoredFrameProgressData,
   StoredTypingProgressData,
   SubtitleCue,
   Tag,
@@ -21,6 +22,8 @@ export interface UnknownWordCsvRow {
   meaning: string;
 }
 
+const TYPE_REVIEW_TAG_CONTENTS = new Set(['ignorance', 'unaudible']);
+
 interface ReviewSource {
   subtitleCues: SubtitleCue[];
   typingFrames?: TimedCaptionFrame[];
@@ -34,6 +37,27 @@ export function buildSessionReviewFrames(
     subtitleCues: session.subtitleCues,
     typingFrames: session.typingFrames,
   }, typingProgress);
+}
+
+export function buildSessionTypeReviewFrames(
+  session: StoredLocalPlayerSession,
+  typingProgress: StoredTypingProgressData,
+): ReviewFrame[] {
+  return buildSessionReviewFrames(session, typingProgress).filter((reviewFrame) => (
+    reviewFrame.tags.some((tag) => TYPE_REVIEW_TAG_CONTENTS.has(tag.content))
+  ));
+}
+
+export function createTypeReviewTypingProgress(reviewFrames: ReviewFrame[]): StoredTypingProgressData {
+  return Object.fromEntries(reviewFrames.map((reviewFrame) => {
+    const progress: StoredFrameProgressData = {
+      finishedCharIds: [],
+      tags: reviewFrame.tags,
+      updatedAt: undefined,
+    };
+
+    return [reviewFrame.frame.id, progress];
+  }));
 }
 
 export function buildStoredSubtitleReviewFrames(

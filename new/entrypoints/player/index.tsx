@@ -20,7 +20,9 @@ import {
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../../src/lib/chineseTyping';
 import {
   buildSessionReviewFrames,
+  buildSessionTypeReviewFrames,
   buildStoredSubtitleReviewFrames,
+  createTypeReviewTypingProgress,
   createStoredSubtitleUnknownWordCsvRows,
   createUnknownWordCsv,
   createUnknownWordCsvRows,
@@ -65,6 +67,8 @@ interface ActiveSession {
   storageKey: string;
   typingProgress: StoredTypingProgressData;
   initialTime?: number;
+  typeReviewMode?: boolean;
+  typeReviewCueCount?: number;
 }
 
 function PlayerApp() {
@@ -177,7 +181,10 @@ function PlayerApp() {
     setNativeAudioUrl(nativeFile ? URL.createObjectURL(nativeFile) : '');
   };
 
-  const startStoredSession = async (session: StoredLocalPlayerSession) => {
+  const startStoredSession = async (
+    session: StoredLocalPlayerSession,
+    options?: { typeReviewMode?: boolean },
+  ) => {
     setStatus('');
 
     const hasMainPermission = await ensureFileHandlePermission(session.mainVideoHandle);
@@ -199,19 +206,46 @@ function PlayerApp() {
       ? await session.nativeAudioHandle.getFile()
       : undefined;
     const storageKey = createLocalPlayerStorageKey(session.id);
-    const [typingProgress, playbackPosition] = await Promise.all([
+    const [storedTypingProgress, playbackPosition] = await Promise.all([
       loadStoredTypingProgress(storageKey),
       loadStoredPlaybackPosition(storageKey),
     ]);
+    let activePlayerSession = session;
+    let typingProgress = storedTypingProgress;
+    let initialTime = getResumePlaybackPosition(session, storedTypingProgress) ?? playbackPosition?.currentTime;
+    let typeReviewCueCount: number | undefined;
+
+    if (options?.typeReviewMode) {
+      const typeReviewFrames = buildSessionTypeReviewFrames(session, storedTypingProgress);
+
+      if (typeReviewFrames.length === 0) {
+        setStatus('No ignorance or unaudible cues to review.');
+        return;
+      }
+
+      activePlayerSession = {
+        ...session,
+        subtitleCues: typeReviewFrames.map((reviewFrame) => reviewFrame.cue),
+        typingFrames: typeReviewFrames.map((reviewFrame) => ({
+          ...reviewFrame.frame,
+          tags: reviewFrame.tags,
+        })),
+      };
+      typingProgress = createTypeReviewTypingProgress(typeReviewFrames);
+      initialTime = activePlayerSession.subtitleCues[0]?.start;
+      typeReviewCueCount = typeReviewFrames.length;
+    }
 
     replaceObjectUrls(mainVideoFile, nativeAudioFile);
     setActiveSession({
-      session,
+      session: activePlayerSession,
       mainVideoFile,
       nativeAudioFile,
       storageKey,
       typingProgress,
-      initialTime: getResumePlaybackPosition(session, typingProgress) ?? playbackPosition?.currentTime,
+      initialTime,
+      typeReviewMode: Boolean(options?.typeReviewMode),
+      typeReviewCueCount,
     });
     await touchLocalPlayerSession(session.id);
     refreshSessions();
@@ -315,6 +349,10 @@ function PlayerApp() {
     } catch {
       setStatus('Failed to open subtitle review.');
     }
+  };
+
+  const handleOpenTypeReview = async (session: StoredLocalPlayerSession) => {
+    await startStoredSession(session, { typeReviewMode: true });
   };
 
   const handleExportExternalUnknownWordsCsv = (item: ExternalHistoryItem) => {
@@ -424,6 +462,11 @@ function PlayerApp() {
       await touchLocalPlayerSession(activeSession.session.id);
       refreshSessions();
     }
+
+    if (activeSession?.typeReviewMode) {
+      return;
+    }
+
     await replayNativeCue(cue);
   }, [activeSession, refreshSessions, replayNativeCue]);
 
@@ -435,7 +478,9 @@ function PlayerApp() {
             <h1>{activeSession ? activeSession.session.title : 'Local player'}</h1>
             <p>
               {activeSession
-                ? activeSession.session.subtitleFileName
+                ? activeSession.typeReviewMode
+                  ? `タイプ復習: ${activeSession.typeReviewCueCount?.toLocaleString() || 0} cues / ${activeSession.session.subtitleFileName}`
+                  : activeSession.session.subtitleFileName
                 : 'Register an MP4 file and subtitles, then resume from history.'}
             </p>
           </div>
@@ -563,6 +608,13 @@ function PlayerApp() {
                         >
                           字幕復習
                         </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleOpenTypeReview(session)}
+                        >
+                          タイプ復習
+                        </button>
                       </div>
                     </article>
                   ))}
@@ -658,6 +710,7 @@ function PlayerApp() {
                 pageUrl={activeSession.storageKey}
                 shadowRoot={document.head}
                 targetId={targetId}
+                typeReviewMode={activeSession.typeReviewMode}
               />
             </>
           </section>

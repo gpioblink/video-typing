@@ -6,6 +6,8 @@ import {
 } from '../src/lib/hintSelection.ts';
 import {
   createStoredSubtitleUnknownWordCsvRows,
+  buildSessionTypeReviewFrames,
+  createTypeReviewTypingProgress,
   createUnknownWordCsv,
   createUnknownWordCsvRows,
 } from '../src/lib/localPlayerReview.ts';
@@ -233,4 +235,61 @@ test('unknown word CSV rows can be created from stored external subtitle data', 
     cueText: 'Keep your goal in mind.',
     meaning: 'remember something',
   }]);
+});
+
+test('type review frames include only cues with ignorance or unaudible tags and reset typing progress', () => {
+  const cues = [
+    { start: 0, end: 1, text: 'I missed this word.' },
+    { start: 2, end: 3, text: 'I typed this cleanly.' },
+    { start: 4, end: 5, text: 'I could not hear this.' },
+    { start: 6, end: 7, text: 'Only a typo here.' },
+  ];
+  const frames = cues.map((cue) => ({
+    ...subtitleCueToCaptionFrame(cue),
+    start: cue.start,
+    end: cue.end,
+  }));
+  const session = {
+    id: 'session-1',
+    title: 'sample',
+    createdAt: 1,
+    updatedAt: 1,
+    mainVideoHandle: {},
+    subtitleFileName: 'sample.srt',
+    subtitleCues: cues,
+    typingFrames: frames,
+  };
+  const reviewFrames = buildSessionTypeReviewFrames(session, {
+    [frames[0].id]: {
+      finishedCharIds: frames[0].caption.filter((char) => char.isTypeable).map((char) => char.id),
+      tags: [{ id: 'tag-1', pastedCharIds: [frames[0].caption[2].id], content: 'ignorance' }],
+      updatedAt: 1,
+    },
+    [frames[2].id]: {
+      finishedCharIds: ['old-finished'],
+      tags: [{ id: 'tag-2', pastedCharIds: [frames[2].caption[2].id], content: 'unaudible' }],
+      updatedAt: 2,
+    },
+    [frames[3].id]: {
+      finishedCharIds: [],
+      tags: [{ id: 'tag-3', pastedCharIds: [frames[3].caption[5].id], content: 'spelling' }],
+      updatedAt: 3,
+    },
+  });
+  const reviewProgress = createTypeReviewTypingProgress(reviewFrames);
+
+  assert.deepEqual(reviewFrames.map((reviewFrame) => reviewFrame.cue.text), [
+    'I missed this word.',
+    'I could not hear this.',
+  ]);
+  assert.deepEqual(reviewProgress[frames[0].id], {
+    finishedCharIds: [],
+    tags: [{ id: 'tag-1', pastedCharIds: [frames[0].caption[2].id], content: 'ignorance' }],
+    updatedAt: undefined,
+  });
+  assert.deepEqual(reviewProgress[frames[2].id], {
+    finishedCharIds: [],
+    tags: [{ id: 'tag-2', pastedCharIds: [frames[2].caption[2].id], content: 'unaudible' }],
+    updatedAt: undefined,
+  });
 });
