@@ -5,6 +5,7 @@ export interface Tag {
   id: ID;
   pastedCharIds: ID[];
   content: TagContent;
+  hint?: DictionaryHintSelection;
 }
 
 export interface Char {
@@ -44,6 +45,14 @@ export interface DictionaryWord {
   title: string;
   content: string;
   dictionaryEntryKey?: string;
+}
+
+export interface DictionaryHintSelection {
+  headword: string;
+  meaning: string;
+  dictionaryEntryKey?: string;
+  selectedText: string;
+  selectedAt: number;
 }
 
 export interface DictionaryEntry {

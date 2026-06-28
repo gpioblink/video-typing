@@ -268,6 +268,7 @@ function normalizeTags(value: unknown): Tag[] {
       id?: unknown;
       pastedCharIds?: unknown;
       content?: unknown;
+      hint?: unknown;
     };
 
     if (
@@ -286,8 +287,42 @@ function normalizeTags(value: unknown): Tag[] {
       id: candidate.id,
       pastedCharIds: candidate.pastedCharIds,
       content: candidate.content,
+      hint: normalizeHintSelection(candidate.hint),
     }];
   });
+}
+
+function normalizeHintSelection(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const candidate = value as {
+    headword?: unknown;
+    meaning?: unknown;
+    dictionaryEntryKey?: unknown;
+    selectedText?: unknown;
+    selectedAt?: unknown;
+  };
+
+  if (
+    typeof candidate.headword !== 'string' ||
+    typeof candidate.meaning !== 'string' ||
+    typeof candidate.selectedText !== 'string' ||
+    typeof candidate.selectedAt !== 'number'
+  ) {
+    return undefined;
+  }
+
+  return {
+    headword: candidate.headword,
+    meaning: candidate.meaning,
+    dictionaryEntryKey: typeof candidate.dictionaryEntryKey === 'string'
+      ? candidate.dictionaryEntryKey
+      : undefined,
+    selectedText: candidate.selectedText,
+    selectedAt: candidate.selectedAt,
+  };
 }
 
 function getLatestTypingProgressUpdatedAt(progress: StoredTypingProgressData) {

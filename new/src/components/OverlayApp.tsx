@@ -77,6 +77,7 @@ export function OverlayApp({
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
+  const [isUnknownHintSelectionActive, setIsUnknownHintSelectionActive] = useState(false);
   const [pendingHintSearchCount, setPendingHintSearchCount] = useState(0);
   const priorityHintKeysRef = useRef<Set<string>>(new Set());
   const priorityHintRequestIdRef = useRef(0);
@@ -93,6 +94,7 @@ export function OverlayApp({
     loopIndex: number;
   } | null>(null);
   const shouldResumeAfterMistakeReasonRef = useRef(false);
+  const unknownHintSelectionHandlerRef = useRef<((word: DictionaryWord) => void) | null>(null);
 
   const cache = useMemo(() => {
     return createCache({
@@ -517,6 +519,7 @@ export function OverlayApp({
       priority?: boolean;
       silentIfMissing?: boolean;
       sourceText?: string;
+      clearExisting?: boolean;
     },
   ) => {
     const isChineseTypingMode = Boolean(typingFrames?.length);
@@ -546,6 +549,12 @@ export function OverlayApp({
 
     if (isPriorityHint) {
       priorityHintRequestIdRef.current = priorityRequestId;
+    }
+
+    if (options?.clearExisting) {
+      priorityHintKeysRef.current = new Set();
+      hintWordOrderRef.current = new Map();
+      setHintWords([]);
     }
 
     const mergeSearchResult = (nextWords: DictionaryWord[]) => {
@@ -721,6 +730,11 @@ export function OverlayApp({
             onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}
+            hintWords={hintWords}
+            onUnknownHintSelectionActiveChange={setIsUnknownHintSelectionActive}
+            onUnknownHintSelectionHandlerChange={(handler) => {
+              unknownHintSelectionHandlerRef.current = handler;
+            }}
           />
         </DraggablePanel>
         <DraggablePanel
@@ -729,7 +743,11 @@ export function OverlayApp({
           defaultPosition={{ x: 700, y: 120 }}
           defaultSize={{ width: 360, height: 400 }}
         >
-          <Hint words={hintWords} />
+          <Hint
+            words={hintWords}
+            selectable={isUnknownHintSelectionActive}
+            onWordSelect={(word) => unknownHintSelectionHandlerRef.current?.(word)}
+          />
         </DraggablePanel>
         {showDebugPanel ? (
           <DraggablePanel
@@ -839,8 +857,27 @@ function areTagsEqual(left: Tag[], right: Tag[]) {
     return (
       leftTag.id === rightTag.id &&
       leftTag.content === rightTag.content &&
+      areHintSelectionsEqual(leftTag.hint, rightTag.hint) &&
       leftTag.pastedCharIds.length === rightTag.pastedCharIds.length &&
       leftTag.pastedCharIds.every((charId, charIndex) => charId === rightTag.pastedCharIds[charIndex])
     );
   });
+}
+
+function areHintSelectionsEqual(left: Tag['hint'], right: Tag['hint']) {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.headword === right.headword &&
+    left.meaning === right.meaning &&
+    left.dictionaryEntryKey === right.dictionaryEntryKey &&
+    left.selectedText === right.selectedText &&
+    left.selectedAt === right.selectedAt
+  );
 }

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../src/components/OverlayApp';
+import { Line } from '../../src/legacy-ui/TypingPart/Line';
+import type { GameChar } from '../../src/legacy-ui/TypingPart/Window';
 import {
   createLocalPlayerStorageKey,
   ensureFileHandlePermission,
@@ -16,8 +18,17 @@ import {
   loadStoredTypingProgress,
 } from '../../src/lib/storage';
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../../src/lib/chineseTyping';
+import {
+  buildSessionReviewFrames,
+  buildStoredSubtitleReviewFrames,
+  createStoredSubtitleUnknownWordCsvRows,
+  createUnknownWordCsv,
+  createUnknownWordCsvRows,
+  type ReviewFrame,
+} from '../../src/lib/localPlayerReview';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../../src/lib/subtitles';
 import type {
+  CaptionFrame,
   ExternalHistoryItem,
   StoredLocalPlayerSession,
   StoredTypingProgressData,
@@ -68,6 +79,10 @@ function PlayerApp() {
   const [externalHistoryItems, setExternalHistoryItems] = useState<ExternalHistoryItem[]>([]);
   const [progressSummaries, setProgressSummaries] = useState<Record<string, string>>({});
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [reviewSession, setReviewSession] = useState<{
+    title: string;
+    reviewFrames: ReviewFrame[];
+  } | null>(null);
   const [mainVideoUrl, setMainVideoUrl] = useState('');
   const [nativeAudioUrl, setNativeAudioUrl] = useState('');
   const [status, setStatus] = useState('');
@@ -114,6 +129,7 @@ function PlayerApp() {
       return;
     }
 
+    setReviewSession(null);
     void listLocalPlayerSessions()
       .then((items) => {
         const session = items.find((item) => item.id === hashSessionId);
@@ -277,6 +293,58 @@ function PlayerApp() {
     }
   };
 
+  const handleExportUnknownWordsCsv = async (session: StoredLocalPlayerSession) => {
+    try {
+      const progress = await loadStoredTypingProgress(createLocalPlayerStorageKey(session.id));
+      const rows = createUnknownWordCsvRows(session, progress);
+      downloadUnknownWordsCsv(session.title, rows);
+      setStatus(`Exported ${rows.length.toLocaleString()} unknown word rows.`);
+    } catch {
+      setStatus('Failed to export unknown words CSV.');
+    }
+  };
+
+  const handleOpenSubtitleReview = async (session: StoredLocalPlayerSession) => {
+    try {
+      const typingProgress = await loadStoredTypingProgress(createLocalPlayerStorageKey(session.id));
+      setReviewSession({
+        title: session.title,
+        reviewFrames: buildSessionReviewFrames(session, typingProgress),
+      });
+      setStatus('');
+    } catch {
+      setStatus('Failed to open subtitle review.');
+    }
+  };
+
+  const handleExportExternalUnknownWordsCsv = (item: ExternalHistoryItem) => {
+    if (!item.subtitle) {
+      setStatus('External site subtitle setting is missing.');
+      return;
+    }
+
+    try {
+      const rows = createStoredSubtitleUnknownWordCsvRows(item.subtitle, item.typingProgress);
+      downloadUnknownWordsCsv(item.title, rows);
+      setStatus(`Exported ${rows.length.toLocaleString()} unknown word rows.`);
+    } catch {
+      setStatus('Failed to export external site unknown words CSV.');
+    }
+  };
+
+  const handleOpenExternalSubtitleReview = (item: ExternalHistoryItem) => {
+    if (!item.subtitle) {
+      setStatus('External site subtitle setting is missing.');
+      return;
+    }
+
+    setReviewSession({
+      title: item.title,
+      reviewFrames: buildStoredSubtitleReviewFrames(item.subtitle, item.typingProgress),
+    });
+    setStatus('');
+  };
+
   const handleOpenExternalPage = (item: ExternalHistoryItem) => {
     window.open(item.url, '_blank', 'noopener,noreferrer');
     setStatus('Opened page. Click the extension button on that tab to resume.');
@@ -399,7 +467,14 @@ function PlayerApp() {
         </header>
 
         {!activeSession ? (
-          <div className="playerGrid">
+          reviewSession ? (
+            <SubtitleReviewView
+              title={reviewSession.title}
+              reviewFrames={reviewSession.reviewFrames}
+              onBack={() => setReviewSession(null)}
+            />
+          ) : (
+            <div className="playerGrid">
             <section className="playerPanel">
               <h2>Register files</h2>
               <div className="fileRows">
@@ -474,6 +549,20 @@ function PlayerApp() {
                         >
                           Delete progress
                         </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleExportUnknownWordsCsv(session)}
+                        >
+                          CSV出力
+                        </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => void handleOpenSubtitleReview(session)}
+                        >
+                          字幕復習
+                        </button>
                       </div>
                     </article>
                   ))}
@@ -516,13 +605,30 @@ function PlayerApp() {
                         >
                           Delete subtitle
                         </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => handleExportExternalUnknownWordsCsv(item)}
+                          disabled={!item.subtitle}
+                        >
+                          CSV出力
+                        </button>
+                        <button
+                          className="playerButton"
+                          type="button"
+                          onClick={() => handleOpenExternalSubtitleReview(item)}
+                          disabled={!item.subtitle}
+                        >
+                          字幕復習
+                        </button>
                       </div>
                     </article>
                   ))}
                 </div>
               </section>
             </div>
-          </div>
+            </div>
+          )
         ) : (
           <section className="videoStage">
             <>
@@ -568,6 +674,71 @@ interface FileHandlePickerProps {
   optional?: boolean;
   onError: (message: string) => void;
   onPick: (handle: FileSystemFileHandle | null) => void;
+}
+
+interface SubtitleReviewViewProps {
+  title: string;
+  reviewFrames: ReviewFrame[];
+  onBack: () => void;
+}
+
+function SubtitleReviewView({ title, reviewFrames, onBack }: SubtitleReviewViewProps) {
+  return (
+    <section className="playerPanel subtitleReviewPanel">
+      <div className="subtitleReviewHeader">
+        <div>
+          <h2>字幕復習</h2>
+          <p>{title}</p>
+        </div>
+        <button className="playerButton" type="button" onClick={onBack}>
+          Back to history
+        </button>
+      </div>
+      <div className="subtitleReviewList">
+        {reviewFrames.map((reviewFrame, index) => (
+          <SubtitleReviewCue
+            key={reviewFrame.frame.id}
+            index={index}
+            reviewFrame={reviewFrame}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SubtitleReviewCue({ index, reviewFrame }: { index: number; reviewFrame: ReviewFrame }) {
+  const frame: CaptionFrame = {
+    ...reviewFrame.frame,
+    tags: reviewFrame.tags,
+  };
+  const finishedCharIds = new Set(reviewFrame.finishedCharIds);
+  const gameChars: GameChar[] = frame.caption.map((char) => ({
+    char,
+    input: char.char,
+    status: char.isTypeable && finishedCharIds.has(char.id) ? 'finished' : 'wait',
+  }));
+  const rows = splitReviewGameCharsIntoRows(gameChars);
+
+  return (
+    <article className="subtitleReviewCue">
+      <div className="subtitleReviewMeta">
+        <strong>#{index + 1}</strong>
+        <span>{formatCueTime(reviewFrame.cue.start)} - {formatCueTime(reviewFrame.cue.end)}</span>
+      </div>
+      <div className="subtitleReviewTyping">
+        {rows.map((chars, rowIndex) => (
+          <Line
+            key={chars[0]?.char.id || `review-line-${rowIndex}`}
+            chars={chars}
+            tags={frame.tags}
+            onTaggedCharClick={() => undefined}
+          />
+        ))}
+      </div>
+      <div className="subtitleReviewText">{reviewFrame.cue.text}</div>
+    </article>
+  );
 }
 
 function FileHandlePicker({
@@ -735,6 +906,55 @@ function formatHistoryDate(timestamp: number) {
   }
 
   return new Date(timestamp).toLocaleString();
+}
+
+function formatCueTime(seconds: number) {
+  if (!Number.isFinite(seconds)) {
+    return '0:00.000';
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds - minutes * 60;
+
+  return `${minutes}:${remainingSeconds.toFixed(3).padStart(6, '0')}`;
+}
+
+function sanitizeFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'video-typing';
+}
+
+function downloadUnknownWordsCsv(title: string, rows: ReturnType<typeof createUnknownWordCsvRows>) {
+  const csv = createUnknownWordCsv(rows);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = `${sanitizeFileName(title)}-unknown-words.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function splitReviewGameCharsIntoRows(gameChars: GameChar[]) {
+  const columnsPerLine = 50;
+  const rows: GameChar[][] = [[]];
+
+  for (const char of gameChars) {
+    let currentRow = rows[rows.length - 1];
+
+    if (char.char.char !== '\n' && currentRow.length >= columnsPerLine) {
+      currentRow = [];
+      rows.push(currentRow);
+    }
+
+    currentRow.push(char);
+
+    if (char.char.char === '\n') {
+      rows.push([]);
+    }
+  }
+
+  return rows;
 }
 
 function waitForMediaTime(media: HTMLMediaElement, endTime: number) {

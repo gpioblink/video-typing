@@ -1,9 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Style } from './style';
 import { Line } from '../Line';
 import { createTypedHintContextText } from '../../../lib/hintContext';
+import {
+  createHintSelection,
+  removeOverlappingLowerPriorityMistakeTags,
+  resolveHintTarget,
+} from '../../../lib/hintSelection';
 import { isNetflixHostname } from '../../../lib/netflixSeek';
-import type { CaptionFrame, Char, ChineseTypingWord, ID, Tag, TagContent } from '../../../types';
+import type { CaptionFrame, Char, ChineseTypingWord, DictionaryWord, ID, Tag, TagContent } from '../../../types';
 
 export type TypingStatus = 'wait' | 'available' | 'mistaken' | 'finished';
 
@@ -24,6 +29,9 @@ interface Props {
   onFrameInteracted: () => void;
   onFinishedCharIdsChange: (finishedCharIds: ID[]) => void;
   onTagsChange: (tags: Tag[]) => void;
+  hintWords?: DictionaryWord[];
+  onUnknownHintSelectionActiveChange?: (active: boolean) => void;
+  onUnknownHintSelectionHandlerChange?: (handler: ((word: DictionaryWord) => void) | null) => void;
 }
 
 interface ExplanationRequestOptions {
@@ -31,6 +39,7 @@ interface ExplanationRequestOptions {
   priority?: boolean;
   silentIfMissing?: boolean;
   sourceText?: string;
+  clearExisting?: boolean;
 }
 
 const AUTO_HINT_EXCLUDED_WORDS = new Set([
@@ -50,9 +59,9 @@ const DEFAULT_COLUMNS_PER_LINE = 50;
 const CHAR_CELL_WIDTH = 12;
 const WINDOW_HORIZONTAL_PADDING = 24;
 const MISTAKE_REASON_KEYS: Record<string, TagContent> = {
-  j: 'ignorance',
-  k: 'unaudible',
-  l: 'spelling',
+  u: 'ignorance',
+  j: 'unaudible',
+  m: 'spelling',
 };
 
 interface WordInfo {
@@ -63,6 +72,7 @@ interface WordInfo {
 interface PendingMistake extends WordInfo {
   sourceText?: string;
   shouldCompleteAfterSelection: boolean;
+  selectionPhase: 'reason' | 'hint';
 }
 
 function initializeGame(frame: CaptionFrame, initialFinishedCharIds: ID[]) {
@@ -236,6 +246,9 @@ export function Window({
   onFrameInteracted,
   onFinishedCharIdsChange,
   onTagsChange,
+  hintWords = [],
+  onUnknownHintSelectionActiveChange,
+  onUnknownHintSelectionHandlerChange,
 }: Props) {
   const [game, setGame] = useState(() => initializeGame(frame, initialFinishedCharIds));
   const [keyboardLog, setKeyboardLog] = useState<Array<{ currentCharId: ID; isCorrect: boolean }>>([]);
@@ -307,8 +320,108 @@ export function Window({
     return splitGameCharsIntoRows(game.gameChars, columnsPerLine);
   }, [columnsPerLine, game.gameChars]);
 
+  const selectUnknownHint = useCallback(async (word: DictionaryWord) => {
+    if (!pendingMistake) {
+      return;
+    }
+
+    const resolvedTarget = resolveHintTarget(frame, pendingMistake.targetCharIds, word.title);
+    const nextTag: Tag = {
+      id: crypto.randomUUID(),
+      pastedCharIds: resolvedTarget.targetCharIds,
+      content: 'ignorance',
+      hint: createHintSelection(word, resolvedTarget.selectedText),
+    };
+
+    setGame((state) => {
+      const nextTags = [
+        ...removeOverlappingLowerPriorityMistakeTags(state.tags, resolvedTarget.targetCharIds),
+        nextTag,
+      ];
+      const nextGame = {
+        ...state,
+        tags: nextTags,
+      };
+      gameRef.current = nextGame;
+      return nextGame;
+    });
+
+    console.log('[video-typing][hint][unknown-hint-selected]', {
+      frameId: frame.id,
+      query: pendingMistake.query,
+      headword: word.title,
+      selectedText: resolvedTarget.selectedText,
+      shouldCompleteAfterSelection: pendingMistake.shouldCompleteAfterSelection,
+      hintAlreadyRequested: Boolean(pendingMistakeExplanationPromiseRef.current),
+    });
+    const explanationPromise = pendingMistakeExplanationPromiseRef.current || Promise.resolve();
+    pendingMistakeExplanationPromiseRef.current = null;
+    setPendingMistake(null);
+    onUnknownHintSelectionActiveChange?.(false);
+    onUnknownHintSelectionHandlerChange?.(null);
+    onMistakeReasonPromptClose?.();
+
+    if (pendingMistake.shouldCompleteAfterSelection) {
+      await explanationPromise;
+      sendCompleted();
+      return;
+    }
+
+    window.setTimeout(() => {
+      keyboardRef.current?.focus();
+    }, 0);
+  }, [
+    frame,
+    onMistakeReasonPromptClose,
+    onUnknownHintSelectionActiveChange,
+    onUnknownHintSelectionHandlerChange,
+    pendingMistake,
+    sendCompleted,
+  ]);
+
+  useEffect(() => {
+    const isSelectingUnknownHint = pendingMistake?.selectionPhase === 'hint';
+
+    onUnknownHintSelectionActiveChange?.(isSelectingUnknownHint);
+    onUnknownHintSelectionHandlerChange?.(
+      isSelectingUnknownHint
+        ? (word) => { void selectUnknownHint(word); }
+        : null,
+    );
+
+    return () => {
+      onUnknownHintSelectionActiveChange?.(false);
+      onUnknownHintSelectionHandlerChange?.(null);
+    };
+  }, [
+    onUnknownHintSelectionActiveChange,
+    onUnknownHintSelectionHandlerChange,
+    pendingMistake?.selectionPhase,
+    selectUnknownHint,
+  ]);
+
   const selectMistakeReason = async (content: TagContent) => {
     if (!pendingMistake) {
+      return;
+    }
+
+    const explanationPromise = pendingMistakeExplanationPromiseRef.current
+      || requestExplanation(
+        pendingMistake.query,
+        {
+          contextText: pendingMistake.sourceText
+            ? undefined
+            : createTypedHintContextText(frame, pendingMistake.targetCharIds),
+          sourceText: pendingMistake.sourceText,
+        },
+      );
+
+    if (content === 'ignorance') {
+      pendingMistakeExplanationPromiseRef.current = explanationPromise;
+      setPendingMistake({
+        ...pendingMistake,
+        selectionPhase: 'hint',
+      });
       return;
     }
 
@@ -334,16 +447,6 @@ export function Window({
       shouldCompleteAfterSelection: pendingMistake.shouldCompleteAfterSelection,
       hintAlreadyRequested: Boolean(pendingMistakeExplanationPromiseRef.current),
     });
-    const explanationPromise = pendingMistakeExplanationPromiseRef.current
-      || requestExplanation(
-        pendingMistake.query,
-        {
-          contextText: pendingMistake.sourceText
-            ? undefined
-            : createTypedHintContextText(frame, pendingMistake.targetCharIds),
-          sourceText: pendingMistake.sourceText,
-        },
-      );
     pendingMistakeExplanationPromiseRef.current = null;
     setPendingMistake(null);
     onMistakeReasonPromptClose?.();
@@ -357,6 +460,73 @@ export function Window({
     window.setTimeout(() => {
       keyboardRef.current?.focus();
     }, 0);
+  };
+
+  const cancelUnknownHintSelectionAsUnaudible = useCallback(() => {
+    if (!pendingMistake) {
+      return;
+    }
+
+    const nextTag: Tag = {
+      id: crypto.randomUUID(),
+      pastedCharIds: pendingMistake.targetCharIds,
+      content: 'unaudible',
+    };
+
+    setGame((state) => {
+      const nextGame = {
+        ...state,
+        tags: [...state.tags, nextTag],
+      };
+      gameRef.current = nextGame;
+      return nextGame;
+    });
+
+    pendingMistakeExplanationPromiseRef.current = null;
+    setPendingMistake(null);
+    onUnknownHintSelectionActiveChange?.(false);
+    onUnknownHintSelectionHandlerChange?.(null);
+    onMistakeReasonPromptClose?.();
+
+    window.setTimeout(() => {
+      keyboardRef.current?.focus();
+    }, 0);
+  }, [
+    onMistakeReasonPromptClose,
+    onUnknownHintSelectionActiveChange,
+    onUnknownHintSelectionHandlerChange,
+    pendingMistake,
+  ]);
+
+  const beginClickedUnknownHintSelection = (wordInfo: WordInfo) => {
+    const sourceText = getChineseSourceTextForWordInfo(frame, wordInfo);
+    const contextText = sourceText
+      ? undefined
+      : createTypedHintContextText(frame, wordInfo.targetCharIds);
+
+    console.log('[video-typing][hint][typing-request]', {
+      frameId: frame.id,
+      trigger: 'clicked-unknown-word',
+      query: wordInfo.query,
+      silentIfMissing: false,
+    });
+    pendingMistakeExplanationPromiseRef.current = requestExplanation(
+      wordInfo.query,
+      {
+        contextText,
+        priority: true,
+        silentIfMissing: false,
+        sourceText,
+        clearExisting: true,
+      },
+    );
+    setPendingMistake({
+      ...wordInfo,
+      sourceText,
+      shouldCompleteAfterSelection: false,
+      selectionPhase: 'hint',
+    });
+    onMistakeReasonPromptOpen?.();
   };
 
   const handleTaggedWordClick = (charId: ID) => {
@@ -377,23 +547,26 @@ export function Window({
 
     onFrameInteracted();
 
+    if (!targetTag) {
+      beginClickedUnknownHintSelection(wordInfo);
+      return;
+    }
+
+    const nextContent = getNextTagContent(targetTag.content);
+
+    if (nextContent === 'ignorance') {
+      beginClickedUnknownHintSelection(wordInfo);
+      return;
+    }
+
     setGame((state) => {
-      const nextTags = !targetTag
-        ? [...state.tags, {
-          id: crypto.randomUUID(),
-          pastedCharIds: wordInfo.targetCharIds,
-          content: 'ignorance' as TagContent,
-        }]
-        : (() => {
-          const nextContent = getNextTagContent(targetTag.content);
-          return nextContent == null
-            ? state.tags.filter((tag) => tag.id !== targetTag.id)
-            : state.tags.map((tag) => (
-              tag.id === targetTag.id
-                ? { ...tag, content: nextContent }
-                : tag
-            ));
-        })();
+      const nextTags = nextContent == null
+        ? state.tags.filter((tag) => tag.id !== targetTag.id)
+        : state.tags.map((tag) => (
+          tag.id === targetTag.id
+            ? { ...tag, content: nextContent }
+            : tag
+        ));
       const nextGame = {
         ...state,
         tags: nextTags,
@@ -459,6 +632,21 @@ export function Window({
         stopKeyboardEventPropagation(event);
         if (pendingMistake) {
           event.preventDefault();
+          if (pendingMistake.selectionPhase === 'hint') {
+            if (event.key === 'Escape') {
+              cancelUnknownHintSelectionAsUnaudible();
+              return;
+            }
+
+            const hintIndex = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+            const selectedHint = hintIndex >= 0 ? hintWords[hintIndex] : undefined;
+
+            if (selectedHint) {
+              void selectUnknownHint(selectedHint);
+            }
+            return;
+          }
+
           const nextReason = MISTAKE_REASON_KEYS[event.key.toLowerCase()];
 
           if (nextReason) {
@@ -546,6 +734,7 @@ export function Window({
                 ...wordInfo,
                 sourceText,
                 shouldCompleteAfterSelection: nextWaitIndex === -1,
+                selectionPhase: 'reason',
               });
               onMistakeReasonPromptOpen?.();
             } else if (
@@ -642,16 +831,27 @@ export function Window({
       {pendingMistake ? (
         <div style={mistakePromptOverlayStyle}>
           <div style={mistakePromptStyle} onClick={(event) => event.stopPropagation()}>
-            <div style={mistakePromptTitleStyle}>誤答理由を選んでください</div>
-            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('ignorance')}>
-              J...単語を知らなかった
-            </button>
-            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('unaudible')}>
-              K...聞き取れなかった
-            </button>
-            <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('spelling')}>
-              L...スペルミス/タイポ
-            </button>
+            {pendingMistake.selectionPhase === 'hint' ? (
+              <>
+                <div style={mistakePromptTitleStyle}>知らなかったヒントを選んでください</div>
+                <div style={mistakePromptDescriptionStyle}>
+                  ヒントウィンドウの1〜9を押すか、番号付きの項目をクリックしてください。
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={mistakePromptTitleStyle}>誤答理由を選んでください</div>
+                <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('ignorance')}>
+                  U...単語を知らなかった
+                </button>
+                <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('unaudible')}>
+                  J...聞き取れなかった
+                </button>
+                <button type="button" style={mistakePromptButtonStyle} onClick={() => selectMistakeReason('spelling')}>
+                  M...スペルミス/タイポ
+                </button>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -685,6 +885,12 @@ const mistakePromptTitleStyle: React.CSSProperties = {
   fontWeight: 700,
   color: '#ecf2f1',
   marginBottom: '4px',
+};
+
+const mistakePromptDescriptionStyle: React.CSSProperties = {
+  color: '#b8c8c3',
+  fontSize: '13px',
+  lineHeight: 1.5,
 };
 
 const mistakePromptButtonStyle: React.CSSProperties = {
