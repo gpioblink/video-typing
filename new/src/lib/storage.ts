@@ -183,11 +183,9 @@ export async function saveExternalHistoryMeta(url: string, nextMeta: StoredExter
 }
 
 export async function clearStoredProgressState(storageKey: string) {
-  await Promise.all([
-    deleteStoredTypingProgress(storageKey),
-    deleteStoredPlaybackPosition(storageKey),
-    deleteStoredPlaybackPosition(createPlaybackPositionStorageKey(storageKey, 'type-review')),
-  ]);
+  await deleteStoredTypingProgress(storageKey);
+  await deleteStoredPlaybackPosition(storageKey);
+  await deleteStoredPlaybackPosition(createPlaybackPositionStorageKey(storageKey, 'type-review'));
 }
 
 export async function clearStoredSubtitleSetting(url: string) {

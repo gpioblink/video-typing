@@ -12,8 +12,12 @@ import {
   createUnknownWordCsvRows,
 } from '../src/lib/localPlayerReview.ts';
 import {
+  clearStoredProgressState,
+  createPlaybackPositionStorageKey,
   deleteStoredFrameTypingProgress,
+  loadStoredPlaybackPosition,
   loadStoredTypingProgress,
+  saveStoredPlaybackPosition,
   saveStoredTypingProgress,
 } from '../src/lib/storage.ts';
 import { subtitleCueToCaptionFrame } from '../src/lib/subtitles.ts';
@@ -142,6 +146,40 @@ test('frame progress deletion removes only the requested frame', async () => {
       updatedAt: 3,
     },
   });
+});
+
+test('type review playback position is stored separately and cleared with progress state', async () => {
+  const storage = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (Array.isArray(key)) {
+            return Object.fromEntries(key.map((item) => [item, storage[item]]));
+          }
+
+          return { [key]: storage[key] };
+        },
+        async set(next) {
+          Object.assign(storage, next);
+        },
+      },
+    },
+  };
+
+  const normalKey = 'test-url';
+  const typeReviewKey = createPlaybackPositionStorageKey(normalKey, 'type-review');
+
+  await saveStoredPlaybackPosition(normalKey, 10);
+  await saveStoredPlaybackPosition(typeReviewKey, 20);
+
+  assert.deepEqual(await loadStoredPlaybackPosition(normalKey), { currentTime: 10 });
+  assert.deepEqual(await loadStoredPlaybackPosition(typeReviewKey), { currentTime: 20 });
+
+  await clearStoredProgressState(normalKey);
+
+  assert.equal(await loadStoredPlaybackPosition(normalKey), undefined);
+  assert.equal(await loadStoredPlaybackPosition(typeReviewKey), undefined);
 });
 
 test('unknown word selection removes overlapping unaudible and spelling tags', () => {
