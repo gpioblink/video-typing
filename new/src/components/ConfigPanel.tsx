@@ -7,12 +7,22 @@ interface Props {
   config: OverlayConfig;
   currentCueNumber: number | null;
   cueCount: number;
+  subtitleFileName: string;
   displaySubtitleFileName?: string;
+  netflixSubtitleTracks?: Array<{
+    id: string;
+    label: string;
+  }>;
   onConfigChange: (config: OverlayConfig) => void;
   onJumpToCue: (cueNumber: number) => void;
   canResetCurrentCueState: boolean;
   onResetCurrentCueState: () => void;
   onDisplaySubtitleChange: (fileName: string, cues: SubtitleCue[]) => Promise<void> | void;
+  onLoadNetflixSubtitleTracks?: () => Promise<Array<{
+    id: string;
+    label: string;
+  }>>;
+  onNetflixSubtitleTrackChange?: (trackId: string) => Promise<void>;
 }
 
 const SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt';
@@ -21,16 +31,23 @@ export function ConfigPanel({
   config,
   currentCueNumber,
   cueCount,
+  subtitleFileName,
   displaySubtitleFileName,
+  netflixSubtitleTracks,
   onConfigChange,
   onJumpToCue,
   canResetCurrentCueState,
   onResetCurrentCueState,
   onDisplaySubtitleChange,
+  onLoadNetflixSubtitleTracks,
+  onNetflixSubtitleTrackChange,
 }: Props) {
   const [cueText, setCueText] = useState('1');
   const [subtitleStatus, setSubtitleStatus] = useState('');
+  const [loadedNetflixSubtitleTracks, setLoadedNetflixSubtitleTracks] = useState(netflixSubtitleTracks || []);
+  const [selectedNetflixSubtitleTrackId, setSelectedNetflixSubtitleTrackId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const availableNetflixSubtitleTracks = netflixSubtitleTracks || loadedNetflixSubtitleTracks;
 
   const patchConfig = (patch: Partial<OverlayConfig>) => {
     onConfigChange({
@@ -67,6 +84,40 @@ export function ConfigPanel({
       setSubtitleStatus(`Loaded ${cues.length.toLocaleString()} cues.`);
     } catch {
       setSubtitleStatus('Failed to load subtitle file.');
+    }
+  };
+
+  const handleLoadNetflixSubtitleTracks = async () => {
+    if (!onLoadNetflixSubtitleTracks) {
+      return;
+    }
+
+    try {
+      setSubtitleStatus('Loading Netflix subtitles...');
+      const tracks = await onLoadNetflixSubtitleTracks();
+      setLoadedNetflixSubtitleTracks(tracks);
+      setSubtitleStatus(tracks.length > 0
+        ? `Loaded ${tracks.length.toLocaleString()} Netflix subtitle tracks.`
+        : 'No selectable Netflix subtitles found.');
+    } catch {
+      setSubtitleStatus('Failed to load Netflix subtitle tracks.');
+    }
+  };
+
+  const handleNetflixSubtitleTrackChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const trackId = event.target.value;
+    setSelectedNetflixSubtitleTrackId(trackId);
+
+    if (!trackId || !onNetflixSubtitleTrackChange) {
+      return;
+    }
+
+    try {
+      setSubtitleStatus('Changing Netflix subtitle...');
+      await onNetflixSubtitleTrackChange(trackId);
+      setSubtitleStatus('Netflix subtitle changed.');
+    } catch {
+      setSubtitleStatus('Failed to change Netflix subtitle.');
     }
   };
 
@@ -167,9 +218,10 @@ export function ConfigPanel({
 
       <section style={sectionStyle}>
         <div style={sectionHeaderStyle}>
-          <strong>Native subtitle</strong>
+          <strong>Subtitle files</strong>
         </div>
-        <div style={fileNameStyle}>{displaySubtitleFileName || 'Typing subtitle is shown.'}</div>
+        <FileNameRow label="Typing" value={subtitleFileName} />
+        <FileNameRow label="Native" value={displaySubtitleFileName || 'Typing subtitle is shown.'} />
         <input
           ref={fileInputRef}
           type="file"
@@ -184,10 +236,43 @@ export function ConfigPanel({
         >
           Change native subtitle
         </button>
+        {onLoadNetflixSubtitleTracks ? (
+          <>
+            <button
+              type="button"
+              onClick={handleLoadNetflixSubtitleTracks}
+              style={{ ...buttonStyle, width: '100%' }}
+            >
+              Load Netflix subtitles
+            </button>
+            {availableNetflixSubtitleTracks.length > 0 ? (
+              <select
+                value={selectedNetflixSubtitleTrackId}
+                onChange={handleNetflixSubtitleTrackChange}
+                style={selectStyle}
+                aria-label="Netflix subtitle track"
+              >
+                <option value="">Choose Netflix subtitle...</option>
+                {availableNetflixSubtitleTracks.map((track) => (
+                  <option key={track.id} value={track.id}>{track.label}</option>
+                ))}
+              </select>
+            ) : null}
+          </>
+        ) : null}
         {subtitleStatus ? <div style={mutedStyle}>{subtitleStatus}</div> : null}
       </section>
 
       <div style={buildStyle}>Build: {formatBuildTime(HINT_DEBUG_BUILD_TIME)}</div>
+    </div>
+  );
+}
+
+function FileNameRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={fileNameRowStyle}>
+      <span style={fileNameLabelStyle}>{label}</span>
+      <span style={fileNameStyle}>{value}</span>
     </div>
   );
 }
@@ -302,6 +387,11 @@ const inputStyle: React.CSSProperties = {
   color: '#ecf2f1',
 };
 
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  width: '100%',
+};
+
 const buttonStyle: React.CSSProperties = {
   border: '1px solid rgba(236, 242, 241, 0.24)',
   borderRadius: 6,
@@ -322,6 +412,19 @@ const fileNameStyle: React.CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
+};
+
+const fileNameRowStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '64px minmax(0, 1fr)',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const fileNameLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  opacity: 0.82,
 };
 
 const buildStyle: React.CSSProperties = {

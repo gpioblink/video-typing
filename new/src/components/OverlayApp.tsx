@@ -41,11 +41,23 @@ interface Props {
   initialTypingFrames?: TimedCaptionFrame[];
   displaySubtitleCues?: SubtitleCue[];
   displaySubtitleFileName?: string;
+  netflixSubtitleTracks?: Array<{
+    id: string;
+    label: string;
+  }>;
   showDebugPanel?: boolean;
   typeReviewMode?: boolean;
   onNativeCueReplay?: (cue: SubtitleCue) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
   onDisplaySubtitleChange?: (fileName: string, cues: SubtitleCue[]) => Promise<void> | void;
+  onLoadNetflixSubtitleTracks?: () => Promise<Array<{
+    id: string;
+    label: string;
+  }>>;
+  onNetflixSubtitleTrackChange?: (trackId: string) => Promise<{
+    fileName: string;
+    cues: SubtitleCue[];
+  }>;
   pageUrl: string;
   playbackStorageKey?: string;
   targetId: string;
@@ -59,11 +71,14 @@ export function OverlayApp({
   initialTypingFrames,
   displaySubtitleCues,
   displaySubtitleFileName,
+  netflixSubtitleTracks,
   showDebugPanel = true,
   typeReviewMode = false,
   onNativeCueReplay,
   onFrameCompleted,
   onDisplaySubtitleChange,
+  onLoadNetflixSubtitleTracks,
+  onNetflixSubtitleTrackChange,
   pageUrl,
   playbackStorageKey,
   shadowRoot,
@@ -589,9 +604,18 @@ export function OverlayApp({
   ]);
 
   const handleDisplaySubtitleChange = useCallback(async (fileName: string, cues: SubtitleCue[]) => {
-    setNativeSubtitleState({ fileName, cues });
     await onDisplaySubtitleChange?.(fileName, cues);
+    setNativeSubtitleState({ fileName, cues });
   }, [onDisplaySubtitleChange]);
+
+  const handleNetflixSubtitleTrackChange = useCallback(async (trackId: string) => {
+    if (!onNetflixSubtitleTrackChange) {
+      return;
+    }
+
+    const nextSubtitle = await onNetflixSubtitleTrackChange(trackId);
+    setNativeSubtitleState(nextSubtitle);
+  }, [onNetflixSubtitleTrackChange]);
 
   const handleMistakeReasonPromptOpen = useCallback(() => {
     setIsMistakeReasonPromptOpen(true);
@@ -990,12 +1014,16 @@ export function OverlayApp({
               config={config}
               currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
               cueCount={subtitleCues.length}
+              subtitleFileName={subtitleFileName}
               displaySubtitleFileName={nativeSubtitleState.fileName}
+              netflixSubtitleTracks={netflixSubtitleTracks}
               onConfigChange={handleConfigChange}
               onJumpToCue={handleJumpToCue}
               canResetCurrentCueState={Boolean(activeCue)}
               onResetCurrentCueState={handleResetCurrentCueState}
               onDisplaySubtitleChange={handleDisplaySubtitleChange}
+              onLoadNetflixSubtitleTracks={onLoadNetflixSubtitleTracks}
+              onNetflixSubtitleTrackChange={onNetflixSubtitleTrackChange ? handleNetflixSubtitleTrackChange : undefined}
             />
           </DraggablePanel>
         ) : null}

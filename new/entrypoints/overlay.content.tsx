@@ -168,6 +168,53 @@ export default defineContentScript({
             initialTypingProgress={typingProgress}
             displaySubtitleCues={subtitleFile.displaySubtitleCues}
             displaySubtitleFileName={subtitleFile.displaySubtitleFileName}
+            onLoadNetflixSubtitleTracks={isNetflixPage
+              ? async () => {
+                const tracks = await getNetflixTrackList();
+                return tracks.subtitles.map((track) => ({
+                  id: track.id,
+                  label: formatTrackLabel(track),
+                }));
+              }
+              : undefined}
+            onNetflixSubtitleTrackChange={isNetflixPage
+              ? async (trackId) => {
+                const nativeSubtitle = await fetchNetflixSubtitle(trackId);
+                const cues = parseSubtitleFile(nativeSubtitle.fileName, nativeSubtitle.text);
+
+                if (cues.length === 0) {
+                  throw new Error('No usable Netflix subtitle cues found.');
+                }
+
+                storedSubtitleForUpdates = {
+                  ...storedSubtitleForUpdates,
+                  displaySubtitleFileName: nativeSubtitle.fileName,
+                  displaySubtitleCues: cues,
+                  netflix: storedSubtitleForUpdates.netflix
+                    ? {
+                      ...storedSubtitleForUpdates.netflix,
+                      nativeSubtitleTrackId: trackId,
+                    }
+                    : storedSubtitleForUpdates.netflix,
+                };
+                subtitleFile = {
+                  ...subtitleFile,
+                  displaySubtitleFileName: nativeSubtitle.fileName,
+                  displaySubtitleCues: cues,
+                  netflix: subtitleFile.netflix
+                    ? {
+                      ...subtitleFile.netflix,
+                      nativeSubtitleTrackId: trackId,
+                    }
+                    : subtitleFile.netflix,
+                };
+                await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
+                return {
+                  fileName: nativeSubtitle.fileName,
+                  cues,
+                };
+              }
+              : undefined}
             onNativeCueReplay={(cue) => replayNetflixNativeCue(subtitleFile, cue)}
             onDisplaySubtitleChange={async (fileName, cues) => {
               storedSubtitleForUpdates = {
