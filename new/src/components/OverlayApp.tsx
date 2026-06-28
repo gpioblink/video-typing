@@ -255,6 +255,10 @@ export function OverlayApp({
   // into the padded pre/post-roll area around that cue.
   const activeCue = loopCue || timelineCue;
 
+  const activeCueIndex = useMemo(() => {
+    return activeCue ? findCueIndex(subtitleCues, activeCue) : -1;
+  }, [activeCue, subtitleCues]);
+
   const displayCue = useMemo(() => {
     if (!activeCue || !displaySubtitleCues?.length) {
       return activeCue;
@@ -558,6 +562,40 @@ export function OverlayApp({
     restoreControlledPlaybackRate,
   ]);
 
+  const handleJumpToCue = useCallback((cueNumber: number) => {
+    if (!Number.isInteger(cueNumber)) {
+      return;
+    }
+
+    const targetCue = subtitleCues[cueNumber - 1];
+
+    if (!targetCue) {
+      return;
+    }
+
+    console.log('[video-typing][debug][cue-jump]', {
+      fromCueNumber: activeCueIndex >= 0 ? activeCueIndex + 1 : null,
+      toCueNumber: cueNumber,
+      cueText: targetCue.text,
+    });
+    resetHintState();
+    nativeReplayCountRef.current = 0;
+    shouldResumeAfterMistakeReasonRef.current = false;
+    loopRangeRef.current = null;
+    setIsMistakeReasonPromptOpen(false);
+    setLoopCue(targetCue);
+    setCurrentTime(targetCue.start);
+    setActiveFrameResetRevision((revision) => revision + 1);
+    restoreControlledPlaybackRate();
+    seekVideo(targetId, targetCue.start);
+  }, [
+    activeCueIndex,
+    resetHintState,
+    restoreControlledPlaybackRate,
+    subtitleCues,
+    targetId,
+  ]);
+
   const stopOverlayKeyboardEventPropagation = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation();
@@ -812,6 +850,9 @@ export function OverlayApp({
               targetId={targetId}
               currentTime={currentTime}
               duration={duration}
+              currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
+              cueCount={subtitleCues.length}
+              onJumpToCue={handleJumpToCue}
               canResetCurrentCueState={Boolean(activeCue)}
               onResetCurrentCueState={handleResetCurrentCueState}
             />
@@ -842,6 +883,23 @@ const overlayStyle: React.CSSProperties = {
 
 function getHintWordKey(word: DictionaryWord) {
   return word.dictionaryEntryKey || `${word.title}\u0000${word.content}`;
+}
+
+function findCueIndex(cues: SubtitleCue[], targetCue: SubtitleCue) {
+  const exactIndex = cues.findIndex((cue) => (
+    cue.start === targetCue.start &&
+    cue.end === targetCue.end &&
+    cue.text === targetCue.text
+  ));
+
+  if (exactIndex !== -1) {
+    return exactIndex;
+  }
+
+  return cues.findIndex((cue) => (
+    cue.start === targetCue.start &&
+    cue.end === targetCue.end
+  ));
 }
 
 function createDictionaryHintWords(

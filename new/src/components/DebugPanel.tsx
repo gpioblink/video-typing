@@ -6,6 +6,9 @@ interface Props {
   targetId: string;
   currentTime: number;
   duration: number;
+  currentCueNumber: number | null;
+  cueCount: number;
+  onJumpToCue: (cueNumber: number) => void;
   canResetCurrentCueState: boolean;
   onResetCurrentCueState: () => void;
 }
@@ -14,10 +17,14 @@ export function DebugPanel({
   targetId,
   currentTime,
   duration,
+  currentCueNumber,
+  cueCount,
+  onJumpToCue,
   canResetCurrentCueState,
   onResetCurrentCueState,
 }: Props) {
   const [seekText, setSeekText] = useState('0');
+  const [cueText, setCueText] = useState('1');
   const video = getVideoElement(targetId);
 
   return (
@@ -40,6 +47,24 @@ export function DebugPanel({
       </div>
       <div style={{ fontSize: 12, opacity: 0.9 }}>
         {currentTime.toFixed(1)} / {duration.toFixed(1)}
+      </div>
+      <div style={{ fontSize: 12, opacity: 0.9 }}>
+        Cue: {currentCueNumber ?? '-'} / {cueCount}
+      </div>
+      <div style={rowStyle}>
+        <input
+          value={cueText}
+          onChange={(event) => setCueText(event.target.value)}
+          style={{ flex: 1, minWidth: 0 }}
+          aria-label="Cue number"
+        />
+        <button
+          type="button"
+          disabled={cueCount === 0}
+          onClick={() => onJumpToCue(Number(cueText))}
+        >
+          Jump cue
+        </button>
       </div>
       <button
         type="button"
