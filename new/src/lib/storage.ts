@@ -21,6 +21,12 @@ const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
 const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
 const EXTERNAL_HISTORY_META_STORAGE_KEY = 'videoTypingPrototypeExternalHistoryMeta';
 
+export type PlaybackPositionMode = 'typing' | 'type-review';
+
+export function createPlaybackPositionStorageKey(storageKey: string, mode: PlaybackPositionMode = 'typing') {
+  return mode === 'typing' ? storageKey : `playback:type-review:${storageKey}`;
+}
+
 export async function loadPanelPosition(hostname: string, kind: PanelKind) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const positions = (result[STORAGE_KEY] || {}) as StoredPanelPositions;
@@ -180,6 +186,7 @@ export async function clearStoredProgressState(storageKey: string) {
   await Promise.all([
     deleteStoredTypingProgress(storageKey),
     deleteStoredPlaybackPosition(storageKey),
+    deleteStoredPlaybackPosition(createPlaybackPositionStorageKey(storageKey, 'type-review')),
   ]);
 }
 
@@ -371,7 +378,7 @@ function getUrlFallbackTitle(url: string) {
 }
 
 function isExternalHistoryUrlKey(value: string) {
-  if (!value || value.startsWith('local-player:')) {
+  if (!value || value.startsWith('local-player:') || value.startsWith('playback:type-review:')) {
     return false;
   }
 

@@ -14,6 +14,7 @@ export default defineConfig({
     permissions: ['activeTab', 'scripting', 'storage'],
     action: {
       default_title: 'video-typing',
+      default_popup: 'popup.html',
     },
   },
 });

@@ -1,0 +1,182 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  min-height: 220px;
+  margin: 0;
+  background: #101417;
+  color: #edf2ef;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+button {
+  font: inherit;
+}
+
+.popupPage {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.popupHeader h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.sectionTitle {
+  margin: 0 0 8px;
+  color: #a9b7b2;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.videoCard {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.thumbnail,
+.thumbnailFallback {
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid #344247;
+  border-radius: 8px;
+  background: #050707;
+  object-fit: cover;
+}
+
+.thumbnailFallback {
+  display: grid;
+  place-items: center;
+  color: #7f8d89;
+  font-size: 12px;
+}
+
+.videoMeta {
+  min-width: 0;
+}
+
+.videoTitle {
+  margin: 0;
+  overflow: hidden;
+  color: #edf2ef;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.metaLine {
+  margin: 4px 0 0;
+  color: #a9b7b2;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.progressBox {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #344247;
+  border-radius: 8px;
+  background: #182024;
+  padding: 10px;
+}
+
+.progressBox strong,
+.progressBox span {
+  display: block;
+}
+
+.progressBox strong {
+  font-size: 13px;
+}
+
+.progressBox span {
+  color: #a9b7b2;
+  font-size: 12px;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+}
+
+.button {
+  width: 100%;
+  border: 1px solid #52615d;
+  border-radius: 8px;
+  background: #1c2529;
+  color: #edf2ef;
+  padding: 9px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.button.primary {
+  border-color: #d8efe5;
+  background: #d8efe5;
+  color: #17201d;
+}
+
+.button.danger {
+  border-color: #7a4d4d;
+  color: #ffd3d3;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.status {
+  margin: 0;
+  color: #ffd38f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.subtitlePanel {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #344247;
+  border-radius: 8px;
+  background: #11181b;
+  padding: 8px;
+}
+
+.subtitleCue {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid #273337;
+  padding-bottom: 8px;
+}
+
+.subtitleCue:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.cueMeta {
+  color: #a9b7b2;
+  font-size: 11px;
+}
+
+.cueText {
+  margin: 0;
+  color: #edf2ef;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

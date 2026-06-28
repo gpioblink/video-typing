@@ -13,6 +13,7 @@ import {
 import {
   clearStoredProgressState,
   clearStoredSubtitleSetting,
+  createPlaybackPositionStorageKey,
   listExternalHistoryItems,
   loadStoredPlaybackPosition,
   loadStoredTypingProgress,
@@ -65,6 +66,7 @@ interface ActiveSession {
   mainVideoFile: File;
   nativeAudioFile?: File;
   storageKey: string;
+  playbackStorageKey: string;
   typingProgress: StoredTypingProgressData;
   initialTime?: number;
   typeReviewMode?: boolean;
@@ -206,16 +208,23 @@ function PlayerApp() {
       ? await session.nativeAudioHandle.getFile()
       : undefined;
     const storageKey = createLocalPlayerStorageKey(session.id);
+    const typeReviewMode = Boolean(options?.typeReviewMode);
+    const playbackStorageKey = createPlaybackPositionStorageKey(
+      storageKey,
+      typeReviewMode ? 'type-review' : 'typing',
+    );
     const [storedTypingProgress, playbackPosition] = await Promise.all([
       loadStoredTypingProgress(storageKey),
-      loadStoredPlaybackPosition(storageKey),
+      loadStoredPlaybackPosition(playbackStorageKey),
     ]);
     let activePlayerSession = session;
     let typingProgress = storedTypingProgress;
-    let initialTime = getResumePlaybackPosition(session, storedTypingProgress) ?? playbackPosition?.currentTime;
+    let initialTime = typeReviewMode
+      ? playbackPosition?.currentTime
+      : getResumePlaybackPosition(session, storedTypingProgress) ?? playbackPosition?.currentTime;
     let typeReviewCueCount: number | undefined;
 
-    if (options?.typeReviewMode) {
+    if (typeReviewMode) {
       const typeReviewFrames = buildSessionTypeReviewFrames(session, storedTypingProgress);
 
       if (typeReviewFrames.length === 0) {
@@ -232,7 +241,7 @@ function PlayerApp() {
         })),
       };
       typingProgress = createTypeReviewTypingProgress(typeReviewFrames);
-      initialTime = activePlayerSession.subtitleCues[0]?.start;
+      initialTime = playbackPosition?.currentTime ?? activePlayerSession.subtitleCues[0]?.start;
       typeReviewCueCount = typeReviewFrames.length;
     }
 
@@ -242,9 +251,10 @@ function PlayerApp() {
       mainVideoFile,
       nativeAudioFile,
       storageKey,
+      playbackStorageKey,
       typingProgress,
       initialTime,
-      typeReviewMode: Boolean(options?.typeReviewMode),
+      typeReviewMode,
       typeReviewCueCount,
     });
     await touchLocalPlayerSession(session.id);
@@ -708,6 +718,7 @@ function PlayerApp() {
                 onFrameMistake={handleFrameMistake}
                 onFrameCompleted={handleFrameCompleted}
                 pageUrl={activeSession.storageKey}
+                playbackStorageKey={activeSession.playbackStorageKey}
                 shadowRoot={document.head}
                 targetId={targetId}
                 typeReviewMode={activeSession.typeReviewMode}

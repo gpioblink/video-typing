@@ -70,6 +70,15 @@ export function buildStoredSubtitleReviewFrames(
   }, typingProgress);
 }
 
+export function buildStoredSubtitleTypeReviewFrames(
+  subtitle: StoredSubtitleData,
+  typingProgress: StoredTypingProgressData,
+): ReviewFrame[] {
+  return buildStoredSubtitleReviewFrames(subtitle, typingProgress).filter((reviewFrame) => (
+    reviewFrame.tags.some((tag) => TYPE_REVIEW_TAG_CONTENTS.has(tag.content))
+  ));
+}
+
 function buildReviewFrames(
   source: ReviewSource,
   typingProgress: StoredTypingProgressData,

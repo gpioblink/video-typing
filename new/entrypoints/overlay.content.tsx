@@ -4,6 +4,7 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import { OverlayApp } from '../src/components/OverlayApp';
 import {
+  createPlaybackPositionStorageKey,
   loadStoredPlaybackPosition,
   loadStoredSubtitle,
   loadStoredTypingProgress,
@@ -12,6 +13,10 @@ import {
   saveStoredSubtitle,
 } from '../src/lib/storage';
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../src/lib/chineseTyping';
+import {
+  buildStoredSubtitleTypeReviewFrames,
+  createTypeReviewTypingProgress,
+} from '../src/lib/localPlayerReview';
 import {
   fetchNetflixSubtitle,
   getNetflixTrackList,
@@ -28,6 +33,7 @@ import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
 const VIDEO_ATTR = 'data-video-typing-target-id';
+const VIDEO_PLAYBACK_STORAGE_KEY_ATTR = 'data-video-typing-playback-storage-key';
 const SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt,.json';
 const SOURCE_SUBTITLE_ACCEPT = '.srt,.vtt,.ttml,.xml,.txt';
 
@@ -45,6 +51,9 @@ declare global {
     __videoTypingPrototypeOverlay__?: {
       remove: () => void;
     };
+    __videoTypingPrototypeLaunchOptions__?: {
+      mode?: 'typing' | 'type-review';
+    };
   }
 }
 
@@ -52,23 +61,60 @@ export default defineContentScript({
   registration: 'runtime',
   cssInjectionMode: 'ui',
   async main(ctx: any) {
+    const launchOptions = window.__videoTypingPrototypeLaunchOptions__ || {};
+    delete window.__videoTypingPrototypeLaunchOptions__;
+
     const video = document.querySelector('video');
     const pageUrl = window.location.href;
     const isNetflixPage = isNetflixHostname(window.location.hostname);
+    const requestedTypeReviewMode = launchOptions.mode === 'type-review';
 
     if (!video) {
       showToast('No video tag found on this page.');
       return;
     }
 
-    const storedPlaybackPosition = await loadStoredPlaybackPosition(pageUrl);
+    const playbackStorageKey = createPlaybackPositionStorageKey(
+      pageUrl,
+      requestedTypeReviewMode ? 'type-review' : 'typing',
+    );
+    const storedPlaybackPosition = await loadStoredPlaybackPosition(playbackStorageKey);
     const storedSubtitle = await loadStoredSubtitle(pageUrl);
     const storedTypingProgress = await loadStoredTypingProgress(pageUrl);
-    const subtitleFile = storedSubtitle || await requestSubtitleFile({ allowNetflixAuto: isNetflixPage });
+    let subtitleFile = storedSubtitle || await requestSubtitleFile({ allowNetflixAuto: isNetflixPage });
+    let typingProgress = storedTypingProgress;
+    let typeReviewMode = false;
 
     if (!subtitleFile) {
       showToast('Subtitle file is required. Overlay was not started.');
       return;
+    }
+
+    if (requestedTypeReviewMode) {
+      if (!storedSubtitle) {
+        showToast('Stored subtitle data is required for review game.');
+        return;
+      }
+
+      const typeReviewFrames = buildStoredSubtitleTypeReviewFrames(storedSubtitle, storedTypingProgress);
+
+      if (typeReviewFrames.length === 0) {
+        showToast('No ignorance or unaudible cues to review.');
+        return;
+      }
+
+      subtitleFile = {
+        ...storedSubtitle,
+        cues: typeReviewFrames.map((reviewFrame) => reviewFrame.cue),
+        typingFrames: typeReviewFrames.map((reviewFrame) => ({
+          ...reviewFrame.frame,
+          tags: reviewFrame.tags,
+        })),
+        displaySubtitleCues: undefined,
+        displaySubtitleFileName: undefined,
+      };
+      typingProgress = createTypeReviewTypingProgress(typeReviewFrames);
+      typeReviewMode = true;
     }
 
     await saveExternalHistoryMeta(pageUrl, {
@@ -82,20 +128,24 @@ export default defineContentScript({
 
     const previousTargetId = video.getAttribute(VIDEO_ATTR);
     if (previousTargetId) {
-      await saveStoredPlaybackPosition(pageUrl, video.currentTime);
+      const previousPlaybackStorageKey = video.getAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR) || pageUrl;
+      await saveStoredPlaybackPosition(previousPlaybackStorageKey, video.currentTime);
     }
 
     window[OVERLAY_KEY]?.remove();
 
     const targetId = `video-typing-${Date.now()}`;
     video.setAttribute(VIDEO_ATTR, targetId);
+    video.setAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR, playbackStorageKey);
     if (subtitleFile.netflix?.englishAudioTrackId) {
       void setNetflixAudioTrack(subtitleFile.netflix.englishAudioTrackId).catch(() => undefined);
     }
     await restorePlaybackPosition(
       video,
       targetId,
-      getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
+      typeReviewMode
+        ? storedPlaybackPosition?.currentTime ?? subtitleFile.cues[0]?.start
+        : getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
     );
 
     const ui = await createShadowRootUi(ctx, {
@@ -113,7 +163,7 @@ export default defineContentScript({
             initialSubtitleCues={subtitleFile.cues}
             initialSubtitleFileName={subtitleFile.fileName}
             initialTypingFrames={subtitleFile.typingFrames}
-            initialTypingProgress={storedTypingProgress}
+            initialTypingProgress={typingProgress}
             displaySubtitleCues={subtitleFile.displaySubtitleCues}
             displaySubtitleFileName={subtitleFile.displaySubtitleFileName}
             onFrameMistake={(cue, mistakeCount) => {
@@ -121,10 +171,14 @@ export default defineContentScript({
                 return replayNetflixNativeCue(subtitleFile, cue);
               }
             }}
-            onFrameCompleted={(cue) => replayNetflixNativeCue(subtitleFile, cue)}
+            onFrameCompleted={(cue) => (
+              typeReviewMode ? undefined : replayNetflixNativeCue(subtitleFile, cue)
+            )}
             pageUrl={pageUrl}
+            playbackStorageKey={playbackStorageKey}
             shadowRoot={container.getRootNode() as ShadowRoot}
             targetId={targetId}
+            typeReviewMode={typeReviewMode}
           />,
         );
         return root;

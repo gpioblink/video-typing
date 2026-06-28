@@ -42,6 +42,7 @@ interface Props {
   onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
   pageUrl: string;
+  playbackStorageKey?: string;
   targetId: string;
   shadowRoot: Node;
 }
@@ -58,6 +59,7 @@ export function OverlayApp({
   onFrameMistake,
   onFrameCompleted,
   pageUrl,
+  playbackStorageKey,
   shadowRoot,
   targetId,
 }: Props) {
@@ -237,8 +239,9 @@ export function OverlayApp({
   }, [currentTime]);
 
   useEffect(() => {
+    const storageKey = playbackStorageKey || pageUrl;
     const persistPlaybackPosition = () => {
-      void saveStoredPlaybackPosition(pageUrl, currentTimeRef.current);
+      void saveStoredPlaybackPosition(storageKey, currentTimeRef.current);
     };
 
     window.addEventListener('pagehide', persistPlaybackPosition);
@@ -247,7 +250,7 @@ export function OverlayApp({
       window.removeEventListener('pagehide', persistPlaybackPosition);
       persistPlaybackPosition();
     };
-  }, [pageUrl]);
+  }, [pageUrl, playbackStorageKey]);
 
   const timelineCue = useMemo(() => {
     return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
@@ -649,7 +652,7 @@ export function OverlayApp({
       clearExisting?: boolean;
     },
   ) => {
-    const isChineseTypingMode = Boolean(typingFrames?.length);
+    const isChineseTypingMode = hasChineseTypingWords(typingFrames);
     const displayQuery = isChineseTypingMode ? options?.sourceText || query : query;
     const contextText = options?.contextText ?? activeCue?.text ?? '';
     const isPriorityHint = options?.priority ?? !options?.silentIfMissing;
@@ -939,6 +942,10 @@ function findCueIndex(cues: SubtitleCue[], targetCue: SubtitleCue) {
     cue.start === targetCue.start &&
     cue.end === targetCue.end
   ));
+}
+
+function hasChineseTypingWords(typingFrames?: TimedCaptionFrame[]) {
+  return Boolean(typingFrames?.some((frame) => frame.words?.length));
 }
 
 function createDictionaryHintWords(
