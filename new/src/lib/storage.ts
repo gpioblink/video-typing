@@ -108,6 +108,26 @@ export async function saveStoredTypingProgress(
   });
 }
 
+export async function deleteStoredFrameTypingProgress(url: string, frameId: string) {
+  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
+  const currentUrlProgress = normalizeTypingProgress(progress[url]);
+
+  if (!(frameId in currentUrlProgress)) {
+    return;
+  }
+
+  const nextUrlProgress = { ...currentUrlProgress };
+  delete nextUrlProgress[frameId];
+
+  await chrome.storage.local.set({
+    [PROGRESS_STORAGE_KEY]: {
+      ...progress,
+      [url]: nextUrlProgress,
+    },
+  });
+}
+
 export async function deleteStoredTypingProgress(url: string) {
   const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
   const progress = { ...((result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>) };

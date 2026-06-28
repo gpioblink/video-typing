@@ -21,6 +21,7 @@ export interface GameChar {
 interface Props {
   frame: CaptionFrame;
   initialFinishedCharIds: ID[];
+  resetRevision?: number;
   sendCompleted: () => void;
   requestExplanation: (query: string, options?: ExplanationRequestOptions) => Promise<void>;
   onMistakeInput?: () => void;
@@ -238,6 +239,7 @@ function stopKeyboardEventPropagation(event: React.KeyboardEvent) {
 export function Window({
   frame,
   initialFinishedCharIds,
+  resetRevision = 0,
   sendCompleted,
   requestExplanation,
   onMistakeInput,
@@ -270,7 +272,7 @@ export function Window({
     pendingMistakeExplanationPromiseRef.current = null;
     hintedWordKeysRef.current = new Set();
     setPendingMistake(null);
-  }, [frame.id]);
+  }, [frame.id, resetRevision]);
 
   useEffect(() => {
     gameRef.current = game;

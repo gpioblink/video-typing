@@ -6,12 +6,16 @@ interface Props {
   targetId: string;
   currentTime: number;
   duration: number;
+  canResetCurrentCueState: boolean;
+  onResetCurrentCueState: () => void;
 }
 
 export function DebugPanel({
   targetId,
   currentTime,
   duration,
+  canResetCurrentCueState,
+  onResetCurrentCueState,
 }: Props) {
   const [seekText, setSeekText] = useState('0');
   const video = getVideoElement(targetId);
@@ -37,6 +41,14 @@ export function DebugPanel({
       <div style={{ fontSize: 12, opacity: 0.9 }}>
         {currentTime.toFixed(1)} / {duration.toFixed(1)}
       </div>
+      <button
+        type="button"
+        disabled={!canResetCurrentCueState}
+        onClick={onResetCurrentCueState}
+        style={{ textAlign: 'left' }}
+      >
+        Reset current cue
+      </button>
       <div style={{ fontSize: 11, opacity: 0.75 }}>
         Build: {formatBuildTime(HINT_DEBUG_BUILD_TIME)}
       </div>

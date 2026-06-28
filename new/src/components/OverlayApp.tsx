@@ -8,6 +8,7 @@ import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
+  deleteStoredFrameTypingProgress,
   saveStoredPlaybackPosition,
   saveStoredTypingProgress,
 } from '../lib/storage';
@@ -79,6 +80,7 @@ export function OverlayApp({
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
   const [isUnknownHintSelectionActive, setIsUnknownHintSelectionActive] = useState(false);
   const [pendingHintSearchCount, setPendingHintSearchCount] = useState(0);
+  const [activeFrameResetRevision, setActiveFrameResetRevision] = useState(0);
   const priorityHintKeysRef = useRef<Set<string>>(new Set());
   const priorityHintRequestIdRef = useRef(0);
   const hintRequestOrderRef = useRef(0);
@@ -329,6 +331,18 @@ export function OverlayApp({
     setPendingHintSearchCount(0);
   }, [activeFrame.id]);
 
+  const resetHintState = useCallback(() => {
+    hintFrameGenerationRef.current += 1;
+    priorityHintKeysRef.current = new Set();
+    priorityHintRequestIdRef.current = 0;
+    hintRequestOrderRef.current = 0;
+    hintWordOrderRef.current = new Map();
+    unknownHintSelectionHandlerRef.current = null;
+    setHintWords([]);
+    setPendingHintSearchCount(0);
+    setIsUnknownHintSelectionActive(false);
+  }, []);
+
   const isActiveFrameComplete = useMemo(() => {
     const typeableCharCount = activeFrame.caption.filter((char) => char.isTypeable).length;
 
@@ -506,6 +520,43 @@ export function OverlayApp({
       return next;
     });
   }, [activeFrame.id, pageUrl]);
+
+  const handleResetCurrentCueState = useCallback(() => {
+    if (!activeCue) {
+      return;
+    }
+
+    console.log('[video-typing][debug][cue-state-reset]', {
+      frameId: activeFrame.id,
+      cueText: activeCue.text,
+    });
+    resetHintState();
+    setTypingProgress((state) => {
+      if (!(activeFrame.id in state)) {
+        return state;
+      }
+
+      const next = { ...state };
+      delete next[activeFrame.id];
+      return next;
+    });
+    void deleteStoredFrameTypingProgress(pageUrl, activeFrame.id);
+    const nextMistakeCounts = { ...mistakeCountsRef.current };
+    delete nextMistakeCounts[activeFrame.id];
+    mistakeCountsRef.current = nextMistakeCounts;
+    nativeReplayCountRef.current = 0;
+    shouldResumeAfterMistakeReasonRef.current = false;
+    setIsMistakeReasonPromptOpen(false);
+    setLoopCue(activeCue);
+    setActiveFrameResetRevision((revision) => revision + 1);
+    restoreControlledPlaybackRate();
+  }, [
+    activeCue,
+    activeFrame.id,
+    pageUrl,
+    resetHintState,
+    restoreControlledPlaybackRate,
+  ]);
 
   const stopOverlayKeyboardEventPropagation = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -722,6 +773,7 @@ export function OverlayApp({
           <Window
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
+            resetRevision={activeFrameResetRevision}
             sendCompleted={handleFrameCompleted}
             requestExplanation={handleRequestExplanation}
             onMistakeInput={handleMistakeInput}
@@ -760,6 +812,8 @@ export function OverlayApp({
               targetId={targetId}
               currentTime={currentTime}
               duration={duration}
+              canResetCurrentCueState={Boolean(activeCue)}
+              onResetCurrentCueState={handleResetCurrentCueState}
             />
           </DraggablePanel>
         ) : null}

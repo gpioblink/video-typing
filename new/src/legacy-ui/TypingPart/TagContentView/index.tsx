@@ -21,5 +21,17 @@ function getTagLabel(content: Tag['content']) {
 }
 
 export function TagContentView({ tag, position }: Props) {
-  return <Style position={position}>{getTagLabel(tag.content)}</Style>;
+  return (
+    <Style position={position} title={getTagHintTitle(tag)}>
+      {getTagLabel(tag.content)}
+    </Style>
+  );
+}
+
+function getTagHintTitle(tag: Tag) {
+  if (tag.content !== 'ignorance' || !tag.hint) {
+    return undefined;
+  }
+
+  return `${tag.hint.headword}\n${tag.hint.meaning}`;
 }

@@ -9,7 +9,11 @@ import {
   createUnknownWordCsv,
   createUnknownWordCsvRows,
 } from '../src/lib/localPlayerReview.ts';
-import { loadStoredTypingProgress, saveStoredTypingProgress } from '../src/lib/storage.ts';
+import {
+  deleteStoredFrameTypingProgress,
+  loadStoredTypingProgress,
+  saveStoredTypingProgress,
+} from '../src/lib/storage.ts';
 import { subtitleCueToCaptionFrame } from '../src/lib/subtitles.ts';
 
 test('hint range resolution maps someone placeholder to actual subtitle words', () => {
@@ -82,6 +86,59 @@ test('storage normalization preserves optional dictionary hint metadata', async 
     dictionaryEntryKey: 'headword:take care',
     selectedText: 'take care',
     selectedAt: 123,
+  });
+});
+
+test('frame progress deletion removes only the requested frame', async () => {
+  const storage = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (Array.isArray(key)) {
+            return Object.fromEntries(key.map((item) => [item, storage[item]]));
+          }
+
+          return { [key]: storage[key] };
+        },
+        async set(next) {
+          Object.assign(storage, next);
+        },
+      },
+    },
+  };
+
+  await saveStoredTypingProgress('test-url', 'frame-1', {
+    finishedCharIds: ['1'],
+    tags: [],
+    updatedAt: 1,
+  });
+  await saveStoredTypingProgress('test-url', 'frame-2', {
+    finishedCharIds: ['2'],
+    tags: [],
+    updatedAt: 2,
+  });
+  await saveStoredTypingProgress('other-url', 'frame-1', {
+    finishedCharIds: ['3'],
+    tags: [],
+    updatedAt: 3,
+  });
+
+  await deleteStoredFrameTypingProgress('test-url', 'frame-1');
+
+  assert.deepEqual(await loadStoredTypingProgress('test-url'), {
+    'frame-2': {
+      finishedCharIds: ['2'],
+      tags: [],
+      updatedAt: 2,
+    },
+  });
+  assert.deepEqual(await loadStoredTypingProgress('other-url'), {
+    'frame-1': {
+      finishedCharIds: ['3'],
+      tags: [],
+      updatedAt: 3,
+    },
   });
 });
 
