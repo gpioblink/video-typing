@@ -461,24 +461,32 @@ function PlayerApp() {
     return nextReplay;
   }, [activeSession?.nativeAudioFile]);
 
-  const handleFrameMistake = useCallback((cue: SubtitleCue, mistakeCount: number) => {
-    if (mistakeCount > 0 && mistakeCount % 5 === 0) {
-      return replayNativeCue(cue);
-    }
-  }, [replayNativeCue]);
-
   const handleFrameCompleted = useCallback(async (cue: SubtitleCue) => {
     if (activeSession) {
       await touchLocalPlayerSession(activeSession.session.id);
       refreshSessions();
     }
+  }, [activeSession, refreshSessions]);
 
-    if (activeSession?.typeReviewMode) {
+  const handleDisplaySubtitleChange = useCallback(async (fileName: string, cues: SubtitleCue[]) => {
+    if (!activeSession) {
       return;
     }
 
-    await replayNativeCue(cue);
-  }, [activeSession, refreshSessions, replayNativeCue]);
+    const nextSession: StoredLocalPlayerSession = {
+      ...activeSession.session,
+      nativeSubtitleFileName: fileName,
+      nativeSubtitleCues: cues,
+      updatedAt: Date.now(),
+    };
+
+    await saveLocalPlayerSession(nextSession);
+    setActiveSession({
+      ...activeSession,
+      session: nextSession,
+    });
+    refreshSessions();
+  }, [activeSession, refreshSessions]);
 
   return (
     <main className={activeSession ? 'playerPage playbackPage' : 'playerPage'}>
@@ -718,8 +726,9 @@ function PlayerApp() {
                 initialTypingProgress={activeSession.typingProgress}
                 displaySubtitleCues={activeSession.session.nativeSubtitleCues}
                 displaySubtitleFileName={activeSession.session.nativeSubtitleFileName}
-                onFrameMistake={handleFrameMistake}
                 onFrameCompleted={handleFrameCompleted}
+                onNativeCueReplay={replayNativeCue}
+                onDisplaySubtitleChange={handleDisplaySubtitleChange}
                 pageUrl={activeSession.storageKey}
                 playbackStorageKey={activeSession.playbackStorageKey}
                 shadowRoot={document.head}

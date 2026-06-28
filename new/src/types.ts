@@ -64,7 +64,7 @@ export interface DictionaryEntry {
   importedAt: number;
 }
 
-export type PanelKind = 'typing' | 'hint' | 'debug' | 'subtitle';
+export type PanelKind = 'typing' | 'hint' | 'config' | 'debug' | 'subtitle';
 
 export interface PanelPosition {
   x: number;
@@ -86,6 +86,19 @@ export interface SubtitleCue {
   start: number;
   end: number;
   text: string;
+}
+
+export interface OverlayConfig {
+  slowPlayback: {
+    enabled: boolean;
+    mistakeThreshold: number;
+  };
+  nativeReplay: {
+    mistakeReplayEnabled: boolean;
+    mistakeThreshold: number;
+    mistakeInterval: number;
+    completionReplayEnabled: boolean;
+  };
 }
 
 export interface StoredSubtitleData {

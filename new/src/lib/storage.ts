@@ -1,6 +1,7 @@
 import type {
   ExternalHistoryItem,
   ID,
+  OverlayConfig,
   PanelKind,
   PanelPosition,
   PanelSize,
@@ -20,6 +21,20 @@ const SUBTITLE_STORAGE_KEY = 'videoTypingPrototypeSubtitles';
 const PROGRESS_STORAGE_KEY = 'videoTypingPrototypeTypingProgress';
 const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
 const EXTERNAL_HISTORY_META_STORAGE_KEY = 'videoTypingPrototypeExternalHistoryMeta';
+const OVERLAY_CONFIG_STORAGE_KEY = 'videoTypingPrototypeOverlayConfig';
+
+export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
+  slowPlayback: {
+    enabled: true,
+    mistakeThreshold: 5,
+  },
+  nativeReplay: {
+    mistakeReplayEnabled: true,
+    mistakeThreshold: 5,
+    mistakeInterval: 5,
+    completionReplayEnabled: true,
+  },
+};
 
 export type PlaybackPositionMode = 'typing' | 'type-review';
 
@@ -63,6 +78,17 @@ export async function savePanelSize(hostname: string, kind: PanelKind, size: Pan
     },
   };
   await chrome.storage.local.set({ [PANEL_SIZE_STORAGE_KEY]: next });
+}
+
+export async function loadOverlayConfig(): Promise<OverlayConfig> {
+  const result = await chrome.storage.local.get(OVERLAY_CONFIG_STORAGE_KEY);
+  return normalizeOverlayConfig(result[OVERLAY_CONFIG_STORAGE_KEY]);
+}
+
+export async function saveOverlayConfig(config: OverlayConfig) {
+  await chrome.storage.local.set({
+    [OVERLAY_CONFIG_STORAGE_KEY]: normalizeOverlayConfig(config),
+  });
 }
 
 export async function loadStoredSubtitle(url: string) {
@@ -239,6 +265,59 @@ function normalizeTypingProgress(progress: Record<string, unknown> | undefined):
       normalizeFrameProgress(frameProgress),
     ]),
   );
+}
+
+function normalizeOverlayConfig(value: unknown): OverlayConfig {
+  if (!value || typeof value !== 'object') {
+    return DEFAULT_OVERLAY_CONFIG;
+  }
+
+  const candidate = value as {
+    slowPlayback?: {
+      enabled?: unknown;
+      mistakeThreshold?: unknown;
+    };
+    nativeReplay?: {
+      mistakeReplayEnabled?: unknown;
+      mistakeThreshold?: unknown;
+      mistakeInterval?: unknown;
+      completionReplayEnabled?: unknown;
+    };
+  };
+
+  return {
+    slowPlayback: {
+      enabled: typeof candidate.slowPlayback?.enabled === 'boolean'
+        ? candidate.slowPlayback.enabled
+        : DEFAULT_OVERLAY_CONFIG.slowPlayback.enabled,
+      mistakeThreshold: normalizePositiveInteger(
+        candidate.slowPlayback?.mistakeThreshold,
+        DEFAULT_OVERLAY_CONFIG.slowPlayback.mistakeThreshold,
+      ),
+    },
+    nativeReplay: {
+      mistakeReplayEnabled: typeof candidate.nativeReplay?.mistakeReplayEnabled === 'boolean'
+        ? candidate.nativeReplay.mistakeReplayEnabled
+        : DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeReplayEnabled,
+      mistakeThreshold: normalizePositiveInteger(
+        candidate.nativeReplay?.mistakeThreshold,
+        DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeThreshold,
+      ),
+      mistakeInterval: normalizePositiveInteger(
+        candidate.nativeReplay?.mistakeInterval,
+        DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeInterval,
+      ),
+      completionReplayEnabled: typeof candidate.nativeReplay?.completionReplayEnabled === 'boolean'
+        ? candidate.nativeReplay.completionReplayEnabled
+        : DEFAULT_OVERLAY_CONFIG.nativeReplay.completionReplayEnabled,
+    },
+  };
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : fallback;
 }
 
 function normalizeFrameProgress(frameProgress: unknown): StoredFrameProgressData {

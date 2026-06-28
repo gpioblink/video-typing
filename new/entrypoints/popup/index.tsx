@@ -148,9 +148,21 @@ function PopupApp() {
       return;
     }
 
-    await clearStoredProgressState(state.context.url);
-    setShowSubtitles(false);
-    await loadState('進捗データを削除しました。');
+    const confirmed = window.confirm(
+      '進捗データを削除します。タイピングゲームの達成状況と再生位置は元に戻せません。\n本当に削除しますか？',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await clearStoredProgressState(state.context.url);
+      setShowSubtitles(false);
+      await loadState('進捗データを削除しました。');
+    } catch {
+      setState((current) => ({ ...current, status: '進捗データの削除に失敗しました。' }));
+    }
   };
 
   const deleteSubtitle = async () => {
@@ -158,9 +170,21 @@ function PopupApp() {
       return;
     }
 
-    await clearStoredSubtitleSetting(state.context.url);
-    setShowSubtitles(false);
-    await loadState('字幕データを削除しました。');
+    const confirmed = window.confirm(
+      '字幕データを削除します。登録済みの字幕情報は元に戻せません。\n本当に削除しますか？',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await clearStoredSubtitleSetting(state.context.url);
+      setShowSubtitles(false);
+      await loadState('字幕データを削除しました。');
+    } catch {
+      setState((current) => ({ ...current, status: '字幕データの削除に失敗しました。' }));
+    }
   };
 
   return (

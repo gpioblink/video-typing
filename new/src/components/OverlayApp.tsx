@@ -1,7 +1,7 @@
 import { CacheProvider } from '@emotion/react';
 import createCache from '@emotion/cache';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DebugPanel } from './DebugPanel';
+import { ConfigPanel } from './ConfigPanel';
 import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { Hint } from '../legacy-ui/Hint';
@@ -9,7 +9,10 @@ import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
 import {
   deleteStoredFrameTypingProgress,
+  DEFAULT_OVERLAY_CONFIG,
+  loadOverlayConfig,
   saveStoredPlaybackPosition,
+  saveOverlayConfig,
   saveStoredTypingProgress,
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
@@ -17,6 +20,7 @@ import { getVideoElement, seekVideo } from '../lib/video';
 import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
+  OverlayConfig,
   StoredFrameProgressData,
   StoredTypingProgressData,
   SubtitleCue,
@@ -26,7 +30,6 @@ import type {
 
 const LOOP_START_PADDING_SECONDS = 1;
 const LOOP_END_PADDING_SECONDS = 1;
-const SLOW_PLAYBACK_MISTAKE_THRESHOLD = 5;
 const SLOW_PLAYBACK_RATE = 0.5;
 const MAX_HINT_WORDS = 100;
 const TYPE_REVIEW_PRAISE_WORDS = ['Cool!', 'Awesome!', 'Nice!', 'Great!', 'Perfect!'];
@@ -40,8 +43,9 @@ interface Props {
   displaySubtitleFileName?: string;
   showDebugPanel?: boolean;
   typeReviewMode?: boolean;
-  onFrameMistake?: (cue: SubtitleCue, mistakeCount: number) => Promise<void> | void;
+  onNativeCueReplay?: (cue: SubtitleCue) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
+  onDisplaySubtitleChange?: (fileName: string, cues: SubtitleCue[]) => Promise<void> | void;
   pageUrl: string;
   playbackStorageKey?: string;
   targetId: string;
@@ -57,8 +61,9 @@ export function OverlayApp({
   displaySubtitleFileName,
   showDebugPanel = true,
   typeReviewMode = false,
-  onFrameMistake,
+  onNativeCueReplay,
   onFrameCompleted,
+  onDisplaySubtitleChange,
   pageUrl,
   playbackStorageKey,
   shadowRoot,
@@ -78,6 +83,14 @@ export function OverlayApp({
   const subtitleFileName = initialSubtitleFileName;
   const typingFrames = initialTypingFrames;
   const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
+  const [config, setConfig] = useState<OverlayConfig>(DEFAULT_OVERLAY_CONFIG);
+  const [nativeSubtitleState, setNativeSubtitleState] = useState<{
+    fileName?: string;
+    cues?: SubtitleCue[];
+  }>({
+    fileName: displaySubtitleFileName,
+    cues: displaySubtitleCues,
+  });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
@@ -112,6 +125,32 @@ export function OverlayApp({
     });
   }, [shadowRoot]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    void loadOverlayConfig().then((storedConfig) => {
+      if (isMounted) {
+        setConfig(storedConfig);
+      }
+    }).catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setNativeSubtitleState({
+      fileName: displaySubtitleFileName,
+      cues: displaySubtitleCues,
+    });
+  }, [displaySubtitleCues, displaySubtitleFileName]);
+
+  const handleConfigChange = useCallback((nextConfig: OverlayConfig) => {
+    setConfig(nextConfig);
+    void saveOverlayConfig(nextConfig);
+  }, []);
+
   const restoreControlledPlaybackRate = useCallback((video = getVideoElement(targetId)) => {
     if (!video) {
       controlledPlaybackRateRef.current = null;
@@ -144,7 +183,7 @@ export function OverlayApp({
       return;
     }
 
-    if (mistakeCount < SLOW_PLAYBACK_MISTAKE_THRESHOLD) {
+    if (!config.slowPlayback.enabled || mistakeCount < config.slowPlayback.mistakeThreshold) {
       if (controlledPlaybackRateRef.current) {
         restoreControlledPlaybackRate(video);
       } else {
@@ -172,7 +211,12 @@ export function OverlayApp({
     video.playbackRate = controlledPlaybackRate.loopIndex % 2 === 0
       ? SLOW_PLAYBACK_RATE
       : 1;
-  }, [restoreControlledPlaybackRate, targetId]);
+  }, [
+    config.slowPlayback.enabled,
+    config.slowPlayback.mistakeThreshold,
+    restoreControlledPlaybackRate,
+    targetId,
+  ]);
 
   const trackNativeReplay = useCallback((replay: Promise<void> | void) => {
     if (!replay) {
@@ -268,13 +312,15 @@ export function OverlayApp({
   }, [activeCue, subtitleCues]);
 
   const displayCue = useMemo(() => {
+    const displaySubtitleCues = nativeSubtitleState.cues;
+
     if (!activeCue || !displaySubtitleCues?.length) {
       return activeCue;
     }
 
     const cueTime = (activeCue.start + activeCue.end) / 2;
     return displaySubtitleCues.find((cue) => cue.start <= cueTime && cueTime < cue.end) || activeCue;
-  }, [activeCue, displaySubtitleCues]);
+  }, [activeCue, nativeSubtitleState.cues]);
 
   const isTypingCueActive = useMemo(() => {
     if (!activeCue) {
@@ -510,16 +556,42 @@ export function OverlayApp({
       [activeFrame.id]: nextCount,
     };
     applyMistakeSensitivePlaybackRate(activeFrame.id, nextCount);
-    trackNativeReplay(onFrameMistake?.(activeCue, nextCount));
-  }, [activeCue, activeFrame.id, applyMistakeSensitivePlaybackRate, onFrameMistake, trackNativeReplay]);
+    if (shouldReplayNativeOnMistake(nextCount, config)) {
+      trackNativeReplay(onNativeCueReplay?.(activeCue));
+    }
+  }, [
+    activeCue,
+    activeFrame.id,
+    applyMistakeSensitivePlaybackRate,
+    config,
+    onNativeCueReplay,
+    trackNativeReplay,
+  ]);
 
   const handleFrameCompleted = useCallback(() => {
     if (!activeCue) {
       return;
     }
 
-    trackNativeReplay(onFrameCompleted?.(activeCue));
-  }, [activeCue, onFrameCompleted, trackNativeReplay]);
+    void Promise.resolve(onFrameCompleted?.(activeCue));
+    const replay = !typeReviewMode && config.nativeReplay.completionReplayEnabled
+      ? onNativeCueReplay?.(activeCue)
+      : undefined;
+
+    trackNativeReplay(replay);
+  }, [
+    activeCue,
+    config.nativeReplay.completionReplayEnabled,
+    onFrameCompleted,
+    onNativeCueReplay,
+    trackNativeReplay,
+    typeReviewMode,
+  ]);
+
+  const handleDisplaySubtitleChange = useCallback(async (fileName: string, cues: SubtitleCue[]) => {
+    setNativeSubtitleState({ fileName, cues });
+    await onDisplaySubtitleChange?.(fileName, cues);
+  }, [onDisplaySubtitleChange]);
 
   const handleMistakeReasonPromptOpen = useCallback(() => {
     setIsMistakeReasonPromptOpen(true);
@@ -909,20 +981,21 @@ export function OverlayApp({
         </DraggablePanel>
         {showDebugPanel ? (
           <DraggablePanel
-            kind="debug"
-            title="Debug"
+            kind="config"
+            title="Config"
             defaultPosition={{ x: 24, y: 24 }}
-            defaultSize={{ width: 340, height: 260 }}
+            defaultSize={{ width: 380, height: 520 }}
           >
-            <DebugPanel
-              targetId={targetId}
-              currentTime={currentTime}
-              duration={duration}
+            <ConfigPanel
+              config={config}
               currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
               cueCount={subtitleCues.length}
+              displaySubtitleFileName={nativeSubtitleState.fileName}
+              onConfigChange={handleConfigChange}
               onJumpToCue={handleJumpToCue}
               canResetCurrentCueState={Boolean(activeCue)}
               onResetCurrentCueState={handleResetCurrentCueState}
+              onDisplaySubtitleChange={handleDisplaySubtitleChange}
             />
           </DraggablePanel>
         ) : null}
@@ -934,7 +1007,7 @@ export function OverlayApp({
         >
           <SubtitlePanel
             cueText={displayCue?.text || ''}
-            fileName={displaySubtitleFileName || subtitleFileName}
+            fileName={nativeSubtitleState.fileName || subtitleFileName}
           />
         </DraggablePanel>
         {praise ? <PraiseOverlay key={praise.id} text={praise.text} /> : null}
@@ -1027,6 +1100,14 @@ function findCueIndex(cues: SubtitleCue[], targetCue: SubtitleCue) {
 
 function hasChineseTypingWords(typingFrames?: TimedCaptionFrame[]) {
   return Boolean(typingFrames?.some((frame) => frame.words?.length));
+}
+
+function shouldReplayNativeOnMistake(mistakeCount: number, config: OverlayConfig) {
+  if (!config.nativeReplay.mistakeReplayEnabled || mistakeCount < config.nativeReplay.mistakeThreshold) {
+    return false;
+  }
+
+  return (mistakeCount - config.nativeReplay.mistakeThreshold) % config.nativeReplay.mistakeInterval === 0;
 }
 
 function createDictionaryHintWords(

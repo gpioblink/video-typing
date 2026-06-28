@@ -90,6 +90,8 @@ export default defineContentScript({
       return;
     }
 
+    let storedSubtitleForUpdates = storedSubtitle || subtitleFile;
+
     if (requestedTypeReviewMode) {
       if (!storedSubtitle) {
         showToast('Stored subtitle data is required for review game.');
@@ -166,14 +168,20 @@ export default defineContentScript({
             initialTypingProgress={typingProgress}
             displaySubtitleCues={subtitleFile.displaySubtitleCues}
             displaySubtitleFileName={subtitleFile.displaySubtitleFileName}
-            onFrameMistake={(cue, mistakeCount) => {
-              if (mistakeCount > 0 && mistakeCount % 5 === 0) {
-                return replayNetflixNativeCue(subtitleFile, cue);
-              }
+            onNativeCueReplay={(cue) => replayNetflixNativeCue(subtitleFile, cue)}
+            onDisplaySubtitleChange={async (fileName, cues) => {
+              storedSubtitleForUpdates = {
+                ...storedSubtitleForUpdates,
+                displaySubtitleFileName: fileName,
+                displaySubtitleCues: cues,
+              };
+              subtitleFile = {
+                ...subtitleFile,
+                displaySubtitleFileName: fileName,
+                displaySubtitleCues: cues,
+              };
+              await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
             }}
-            onFrameCompleted={(cue) => (
-              typeReviewMode ? undefined : replayNetflixNativeCue(subtitleFile, cue)
-            )}
             pageUrl={pageUrl}
             playbackStorageKey={playbackStorageKey}
             shadowRoot={container.getRootNode() as ShadowRoot}
