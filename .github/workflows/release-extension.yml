@@ -1,0 +1,143 @@
+name: Build And Release Extension
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  release-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: new/package-lock.json
+
+      - name: Install dependencies
+        working-directory: new
+        run: npm ci
+
+      - name: Run tests
+        working-directory: new
+        run: npm test
+
+      - name: Build release package
+        working-directory: new
+        run: npm run build:release
+
+      - name: Export release metadata
+        id: release_meta
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const metadata = JSON.parse(fs.readFileSync('new/dist/release-metadata.json', 'utf8'));
+          const lines = [
+            `tag=${metadata.tag}`,
+            `release_name=${metadata.releaseName}`,
+            `asset_name=${metadata.assetName}`,
+            `asset_path=${metadata.assetPath}`,
+            `manifest_version=${metadata.manifestVersion}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`);
+          NODE
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release_meta.outputs.asset_name }}
+          path: ${{ steps.release_meta.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ASSET_NAME: ${{ steps.release_meta.outputs.asset_name }}
+          RELEASE_ASSET_PATH: ${{ steps.release_meta.outputs.asset_path }}
+          RELEASE_NAME: ${{ steps.release_meta.outputs.release_name }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          MANIFEST_VERSION: ${{ steps.release_meta.outputs.manifest_version }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            const releaseName = process.env.RELEASE_NAME;
+            const assetName = process.env.RELEASE_ASSET_NAME;
+            const assetPath = process.env.RELEASE_ASSET_PATH;
+            const body = [
+              `Automated release for \`${context.sha.slice(0, 7)}\` from \`${context.ref.replace('refs/heads/', '')}\`.`,
+              '',
+              `Extension version: \`${process.env.MANIFEST_VERSION}\``,
+              `Release version: \`${tag}\``,
+            ].join('\n');
+
+            let release;
+
+            try {
+              const response = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              release = response.data;
+              release = (await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: release.id,
+                tag_name: tag,
+                name: releaseName,
+                body,
+                target_commitish: context.sha,
+              })).data;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              release = (await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: releaseName,
+                body,
+                target_commitish: context.sha,
+              })).data;
+            }
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: release.id,
+              per_page: 100,
+            });
+            const existingAsset = assets.find((asset) => asset.name === assetName);
+
+            if (existingAsset) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: existingAsset.id,
+              });
+            }
+
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: assetName,
+              data: fs.readFileSync(assetPath),
+              headers: {
+                'content-type': 'application/zip',
+                'content-length': fs.statSync(assetPath).size,
+              },
+            });
