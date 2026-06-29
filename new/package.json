@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wxt",
     "build": "CHOKIDAR_USEPOLLING=1 wxt build",
+    "build:release": "node ./scripts/build-release.mjs",
     "zip": "wxt zip",
     "test": "node --loader ./test/ts-loader.mjs --test ./test/*.test.mjs",
     "typecheck": "tsc --noEmit"

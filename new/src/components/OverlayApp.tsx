@@ -1009,6 +1009,10 @@ export function OverlayApp({
             title="Config"
             defaultPosition={{ x: 24, y: 24 }}
             defaultSize={{ width: 380, height: 520 }}
+            minimizable
+            defaultMinimized
+            closable
+            defaultClosed={false}
           >
             <ConfigPanel
               config={config}
