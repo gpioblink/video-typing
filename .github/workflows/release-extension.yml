@@ -16,24 +16,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: new/package-lock.json
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: new/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: new
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run tests
         working-directory: new
-        run: npm test
+        run: pnpm test
 
       - name: Build release package
         working-directory: new
-        run: npm run build:release
+        run: pnpm run build:release
 
       - name: Export release metadata
         id: release_meta

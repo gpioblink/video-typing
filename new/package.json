@@ -2,6 +2,7 @@
   "name": "video-typing-extension",
   "version": "0.0.1",
   "private": true,
+  "packageManager": "pnpm@10.12.4",
   "type": "module",
   "scripts": {
     "dev": "wxt",

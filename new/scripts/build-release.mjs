@@ -18,8 +18,9 @@ const releaseVersion = `v${buildDate}-${shortSha}`;
 const manifestVersion = makeManifestVersion(buildDate, shortSha);
 const assetName = `video-typing-${releaseVersion}.zip`;
 const assetPath = resolve(distDir, assetName);
+const packageManager = detectPackageManager();
 
-run('npm', ['run', 'build'], {
+run(packageManager, ['run', 'build'], {
   cwd: projectDir,
   env: {
     ...process.env,
@@ -98,6 +99,16 @@ function makeManifestVersion(buildDateValue, shortShaValue) {
   const hashSegment = parseInt(shortShaValue.slice(0, 4), 16);
 
   return `${year}.${month}.${day}.${hashSegment}`;
+}
+
+function detectPackageManager() {
+  const userAgent = process.env.npm_config_user_agent || '';
+
+  if (userAgent.startsWith('pnpm/')) {
+    return 'pnpm';
+  }
+
+  return 'npm';
 }
 
 function run(command, args, options) {
