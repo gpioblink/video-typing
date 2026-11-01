@@ -1,0 +1,72 @@
+English subtitles for the recommended Blender Open Movies
+========================================================
+
+These English subtitle files are redistributed under Creative Commons
+Attribution 3.0 Unported (CC BY 3.0). Sharing and adaptation are permitted
+under that licence, including its attribution requirements.
+Licence: https://creativecommons.org/licenses/by/3.0/
+Legal code: https://creativecommons.org/licenses/by/3.0/legalcode
+
+Only subtitle files are included. No movie, soundtrack, logo, or thumbnail
+is bundled. Videos are played from their original official YouTube uploads.
+The creators do not endorse Video Typing.
+
+Sintel
+------
+Attribution: © copyright Blender Foundation | durian.blender.org
+Project: https://durian.blender.org/
+Movie: https://www.youtube.com/watch?v=eRsGyueVLvQ
+Official download page: https://durian.blender.org/download/
+Original English subtitle:
+https://durian.blender.org/wp-content/content/subtitles/sintel_en.srt
+Local file: sintel-en.srt
+Changes to subtitle file: none; original bytes and timestamps preserved.
+SHA-256: 4ed7e1f1bc5ff69fe33606960e4c048ba6766237bf33b132fef76e1a92cb64b2
+Size: 1,514 bytes; 26 cues.
+
+Primary licensing evidence: https://durian.blender.org/sharing/
+This official project policy licenses the project results, all data
+published online/on DVD, and website contents under CC BY 3.0, except for
+identified exceptions such as logos and unrelated third-party material.
+The English SRT is directly linked by the official download page and has
+no separate restrictive notice. For reuse other than redistributing the
+movie itself, the policy specifies the Blender Foundation attribution
+given above. Full movie credits remain available on the original upload.
+
+Tears of Steel
+--------------
+Attribution: (CC) Blender Foundation | mango.blender.org
+Project: https://mango.blender.org/
+Movie: https://www.youtube.com/watch?v=R6MlUcmOul8
+Official download page: https://mango.blender.org/download/
+Original English subtitle:
+https://download.blender.org/demo/movies/ToS/subtitles/TOS-en.srt
+Local file: tears-of-steel-en.srt
+Changes to subtitle file: none; original bytes and timestamps preserved.
+SHA-256: ce9578f6fe098a5821045a38884b229160f9e7ba27890448a92f5be330c6e6fe
+Size: 4,764 bytes; 76 cues.
+
+Primary licensing evidence: https://mango.blender.org/sharing/
+This official project policy licenses the project results, all data
+published online/on DVD, and website contents under CC BY 3.0, except for
+identified exceptions such as logos and unrelated third-party material.
+The English SRT is directly linked by the official download page and has
+no separate restrictive notice. The policy specifies the Blender
+Foundation attribution given above. A separate soundtrack copyright notice
+does not apply to these subtitle files; no soundtrack is redistributed.
+
+Timing and catalogue provenance
+------------------------------
+Verified 2026-11-01 using the exact official YouTube uploads above in a
+fresh Chrome session: both embeds played successfully, with durations of
+888.061 seconds (Sintel) and 734.181 seconds (Tears of Steel).
+Native YouTube captions were compared with the distributed SRT:
+Sintel cues 1, 7, and 12 were displayed at 108.23, 130.48, and 154.72
+seconds respectively, all within their published SRT time ranges.
+Tears of Steel cues 24, 29, and 32 were displayed at 224.99, 237.93, and
+246.73 seconds respectively, all within their published SRT time ranges.
+The catalogue therefore uses zero added subtitle offset for these uploads.
+Other uploads or new editions may require a different offset.
+
+The application selects practice ranges at runtime. It does not rewrite
+the source subtitle text or represent this film dialogue as original text.
