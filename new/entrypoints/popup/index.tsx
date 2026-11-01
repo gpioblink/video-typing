@@ -18,6 +18,7 @@ import type {
   SubtitleCue,
   TimedCaptionFrame,
 } from '../../src/types';
+import { SavedClips } from '../../src/components/SavedClips';
 import '../../src/styles/popup.css';
 
 interface TabContext {
@@ -242,6 +243,9 @@ function PopupApp() {
           void startOverlay('typing', { start: Number(clipStart), end: Number(clipEnd) });
         }}>この区間を通常画面で開く</button>
       </section>}
+
+      <SavedClips currentTitle={videoTitle} currentUrl={state.context?.url || ''} hasVideo={Boolean(state.context?.video?.hasVideo)}
+        start={clipStart} end={clipEnd} disabled={state.loading || isStarting} onPlay={range => startOverlay('typing', range)} />
 
       {hasProgress ? (
         <section className="progressBox">
