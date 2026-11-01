@@ -12,6 +12,7 @@ import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { importDictionaryTsv } from '../lib/dictionary';
 import { ensureDefaultDictionary } from '../lib/defaultDictionary';
 import { calculatePracticeLayout } from '../lib/practiceLayout';
+import { getDemoDeviceKind } from '../lib/demoDevice';
 import type { StoredTypingProgressData, SubtitleCue } from '../types';
 import '../styles/player.css';
 import '../styles/quick-play.css';
@@ -36,7 +37,7 @@ interface OpenPractice {
 const TUTORIAL_KEY = 'video-typing-tutorial-v3';
 function learned() {
   try {
-    return ['done', 'dismissed'].includes(localStorage.getItem(TUTORIAL_KEY) || '');
+    return localStorage.getItem(TUTORIAL_KEY) === 'done';
   } catch {
     return false;
   }
@@ -46,6 +47,15 @@ function time(seconds: number) {
 }
 
 export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boolean }) {
+  const deviceKind = useMemo(() => getDemoDeviceKind({
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    mobileHint: (navigator as Navigator & { userAgentData?: { mobile: boolean } }).userAgentData?.mobile,
+    coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+    screenWidth: window.screen.width,
+    screenHeight: window.screen.height,
+  }), []);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [active, setActive] = useState<OpenPractice | null>(null);
   const [start, setStart] = useState(0);
@@ -56,6 +66,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
   const [customCues, setCustomCues] = useState<SubtitleCue[]>([]);
   const [customFileName, setCustomFileName] = useState('');
   const [withTutorial, setWithTutorial] = useState(() => !learned());
+  const markTutorialCompleted = useCallback(() => setWithTutorial(false), []);
   const [displayMode, setDisplayMode] = useState<'mini' | 'fullscreen'>('mini');
   const [dictionaryStatus, setDictionaryStatus] = useState('EJDictを準備しています…');
   const generation = useRef(0);
@@ -191,6 +202,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         key={active.run}
         practice={active}
         displayMode={displayMode}
+        onTutorialCompleted={markTutorialCompleted}
         onBack={() => {
           setActive(null);
           if (learned()) setWithTutorial(false);
@@ -204,13 +216,25 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
     <main className="playerPage">
       <div className="playerShell">
         <header className="playerHeader demoHeader">
-          <h1>Video Typing</h1>
+          <h1>Video Typing (Webデモ版)</h1>
+          <nav className="headerLinks" aria-label="配布・ソースコード">
+            <a className="repositoryLink extensionStoreLink" href="https://github.com/gpioblink/video-typing/releases" target="_blank" rel="noreferrer" aria-label="Chrome拡張機能の配布（準備中）" aria-describedby="extension-store-status">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true" focusable="false">
+                <path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5Z" />
+              </svg>
+              <span id="extension-store-status" className="iconTooltip" role="tooltip">準備中、GitHubのリリースからご利用ください</span>
+            </a>
           <a className="repositoryLink" href="https://github.com/gpioblink/video-typing" target="_blank" rel="noreferrer" aria-label="GitHubリポジトリを開く" title="GitHub">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true" focusable="false">
               <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.084 1.838 1.237 1.838 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.334-5.467-5.93 0-1.31.467-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23a11.51 11.51 0 0 1 3.003-.404c1.02.005 2.045.138 3.003.404 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.922.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
             </svg>
           </a>
+          </nav>
         </header>
+        {deviceKind !== 'desktop' && <aside className="playerPanel deviceNotice" aria-label="キーボードと画面について">
+          <p>このデモで遊ぶにはキーボードが必要です。</p>
+          {deviceKind === 'phone' && <p>PC向けに作成されているため、お使いの画面では正しく表示できないおそれがあります。</p>}
+        </aside>}
         <section className="playerPanel extensionNotice" aria-label="Video Typingの特徴">
           <h2>好きな動画を、語学学習向けのタイピングゲームに</h2>
           <div className="learningFeatures">
@@ -453,11 +477,13 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
 function NormalPractice({
   practice,
   displayMode,
+  onTutorialCompleted,
   onBack,
   onRetry,
 }: {
   practice: OpenPractice;
   displayMode: 'mini' | 'fullscreen';
+  onTutorialCompleted: () => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -496,10 +522,13 @@ function NormalPractice({
     progressRef.current = progress;
     if (Object.values(progress).some((frame) => frame.finishedCharIds.length > 0)) setDidType(true);
   }, []);
-  const closeTutorial = useCallback(() => {
-    setShowTutorial(false);
-    try { localStorage.setItem(TUTORIAL_KEY, tour.stage === 'complete' ? 'done' : 'dismissed'); } catch { /* Optional persistence. */ }
-  }, [tour.stage]);
+  const tutorialStageRef = useRef(tour.stage);
+  tutorialStageRef.current = tour.stage;
+  const receiveTutorialEvent = useCallback((event: Parameters<typeof practiceTutorialReducer>[1]) => {
+    if (tutorialStageRef.current === 'complete' && event.type === 'input') setShowTutorial(false);
+    sendTourEvent(event);
+  }, []);
+  const closeTutorial = useCallback(() => setShowTutorial(false), []);
   const layout = useMemo(() => calculatePracticeLayout(viewport.width, viewport.height, displayMode), [viewport, displayMode]);
   useEffect(() => {
     const adapter =
@@ -544,8 +573,9 @@ function NormalPractice({
       } catch {
         /* Optional persistence. */
       }
+      onTutorialCompleted();
     }
-  }, [showTutorial, tour.stage]);
+  }, [showTutorial, tour.stage, onTutorialCompleted]);
   const typed = Object.values(progressRef.current).reduce(
     (sum, frame) => sum + frame.finishedCharIds.length,
     0,
@@ -555,7 +585,7 @@ function NormalPractice({
       <div className="playerShell">
         <header className="playerHeader">
           <div>
-            <h1>Video Typing</h1>
+            <h1>Video Typing (Webデモ版)</h1>
             <p>
               {clip.title} · {time(clip.start)}–{time(clip.end)}
             </p>
@@ -602,7 +632,7 @@ function NormalPractice({
               panelStorageScope={`web-practice-layout-v5:${displayMode}:${viewport.width < 760 ? 'narrow' : 'wide'}`}
               layoutRevision={layoutRevision}
               onTypingProgressChange={receiveProgress}
-              onTutorialEvent={sendTourEvent}
+              onTutorialEvent={receiveTutorialEvent}
               onReasonMeaningSelectionChange={setReasonNeedsMeaning}
             />
           )}

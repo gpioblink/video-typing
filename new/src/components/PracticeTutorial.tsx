@@ -18,7 +18,7 @@ const COPY = {
   mistake: { number: 2, title: '間違えても続ける', text: '間違えても、そのまま正しい文字が打てるまで続けてください。誤答状況によりスロー再生や日本語音声（対応動画のみ）のヒントが流れます。' },
   reason: { number: 3, title: '誤答の理由を記録', text: '復習時の再挑戦や単語帳作成に利用するため、誤答理由を記録します。キータッチのミスなど、復習に不要なノイズを減らせます。' },
   dictionary: { number: 4, title: '辞書で意味を確認', text: '単語を入力し終わると辞書ウィンドウに意味が表示されます。分からなかった語の意味をその場で確認できます。確認したら入力を続けてください。' },
-  complete: { number: 5, title: '説明は以上です', text: '説明は以上です。挑戦が終わったら、メニュー画面の「学習履歴」から復習や単語帳出力（CSV・Anki）も試してみてください。' },
+  complete: { number: 5, title: '説明は以上です', text: '説明は以上です。挑戦が終わったら、メニュー画面の「学習履歴」から復習や単語帳出力（CSV・Anki）も試してみてください。入力を再開すると案内は閉じます。' },
 };
 
 function viewport(): Rect {
@@ -163,8 +163,8 @@ export function PracticeTutorial({ step, onSkip, onNext, reasonNeedsMeaning = fa
           border: '1px solid #709588', borderRadius: 14, background: '#162229', color: '#edf2ef',
           font: '14px/1.5 system-ui, sans-serif', boxShadow: '0 14px 46px rgba(0,0,0,0.5)', pointerEvents: 'auto' }}>
         <div ref={copyRef} aria-live="polite" aria-atomic="true" style={{ minHeight: 0, overflowY: 'auto', flex: '1 1 auto' }}>
-          {copy.number !== null && <p style={{ margin: '0 0 4px', paddingRight: 20, fontSize: 12, fontWeight: 700, color: '#a8d5c2' }}>{copy.number} / 5</p>}
-          <h2 style={{ margin: '0 0 8px', paddingRight: 20, fontSize: 18, lineHeight: 1.3 }}>{showCopy ? copy.title : step === 'play' ? '動画を準備しています…' : '操作欄を準備しています…'}</h2>
+          {copy.number !== null && <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 700, color: '#a8d5c2' }}>{copy.number} / 5</p>}
+          <h2 style={{ margin: '0 0 8px', fontSize: 18, lineHeight: 1.3 }}>{showCopy ? copy.title : step === 'play' ? '動画を準備しています…' : '操作欄を準備しています…'}</h2>
           <p id={descriptionId} style={{ margin: 0 }}>{showCopy ? copy.text + (step === 'reason' && reasonNeedsMeaning ? ' 「知らなかった」場合は、辞書で当てはまる意味を選んで記録します。' : '') : '操作欄が表示されると案内が続きます。'}</p>
         </div>
         {step === 'dictionary' && <button type="button" onClick={onNext} disabled={!onNext || !spot} style={{
@@ -172,11 +172,7 @@ export function PracticeTutorial({ step, onSkip, onNext, reasonNeedsMeaning = fa
           border: '1px solid #709588', borderRadius: 5, background: 'rgba(216,239,229,0.08)', color: 'inherit',
           font: '13px/1.5 system-ui, sans-serif', cursor: onNext && spot ? 'pointer' : 'default',
         }}>確認しました</button>}
-        <button type="button" aria-label="操作案内を閉じる" onClick={() => skipRef.current()} style={{
-          position: 'absolute', top: 7, right: 7, width: 28, height: 28, display: 'grid', placeItems: 'center',
-          padding: 0, border: 0, borderRadius: 5, background: 'transparent', color: '#b8ccc2',
-          font: '22px/1 system-ui, sans-serif', cursor: 'pointer',
-        }}><span aria-hidden="true">×</span></button>
+
       </div>
     </div>, document.body,
   );

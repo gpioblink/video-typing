@@ -84,14 +84,14 @@ async function chooseVideo(page: Page, video = FIRST) {
 async function openVideo(page: Page, preserveGuide = false) {
   await expectNormalPanels(page);
   if (preserveGuide) return;
-  const close = page.getByRole('button', { name: '操作案内を閉じる', exact: true });
-  if (await close.isVisible()) await close.click();
+  const close = page.locator('.normalTutorial');
+  if (await close.isVisible()) await page.keyboard.press('Escape');
   await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
 }
 
 async function moveToCue(page: Page, cue: SubtitleCue, preserveGuide = false) {
-  const close = page.getByRole('button', { name: '操作案内を閉じる', exact: true });
-  if (!preserveGuide && await close.isVisible()) await close.click();
+  const close = page.locator('.normalTutorial');
+  if (!preserveGuide && await close.isVisible()) await page.keyboard.press('Escape');
   if (await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).getAttribute('aria-pressed') !== 'true') await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
   await page.evaluate(time => (window as any).testPlayer.seekTo(time), cue.start + Math.min(0.1, (cue.end - cue.start) / 2));
   await expect(subtitle(page)).toHaveText(cue.text);
@@ -123,7 +123,7 @@ test('the five-stage tutorial follows a real mistake, reason and dictionary befo
   await mockYouTube(page); await page.goto('/'); await chooseVideo(page); await openVideo(page, true);
   await expect(page.locator('.normalTutorial')).toContainText('1 / 5');
   await expect(page.locator('.normalTutorial')).toContainText('記号や空白');
-  await page.getByRole('button', { name: '操作案内を閉じる', exact: true }).click();
+  await page.keyboard.press('Escape');
   await expect(page.locator('.normalTutorial')).toHaveCount(0);
   await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
   await page.getByRole('button', { name: '操作案内', exact: true }).click();
@@ -143,8 +143,14 @@ test('the five-stage tutorial follows a real mistake, reason and dictionary befo
   await expect(page.locator('.normalTutorial')).toContainText('学習履歴');
   await expect(page.locator('.normalTutorial')).toContainText('CSV');
   await expect(page.locator('.normalTutorial')).toContainText('Anki');
-  await page.getByRole('button', { name: '操作案内を閉じる', exact: true }).click();
+  await expect(page.locator('.normalTutorial').getByRole('button', { name: '操作案内を閉じる' })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('video-typing-tutorial-v3'))).toBe('done');
+  await expect(page.getByRole('heading', { name: 'クリップ完走', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'クリップ選択に戻る', exact: true }).click();
+  await expect(page.getByLabel('操作チュートリアル', { exact: true })).not.toBeChecked();
+  await page.reload();
+  await expect(page.getByLabel('操作チュートリアル', { exact: true })).not.toBeChecked();
+  await chooseVideo(page); await openVideo(page);
   await completeClip(page, FIRST);
   for (let retry = 0; retry < 2; retry++) {
     await page.getByRole('button', { name: 'もう一度プレイ', exact: true }).click();
@@ -356,4 +362,6 @@ test('the tutorial keeps unknown-word meaning selection usable before its dictio
   await expect(keyboard(page).getByText('ignorance', { exact: true })).toBeVisible();
   await keyboard(page).focus(); await keyboard(page).pressSequentially('b');
   await expect(page.locator('.normalTutorial')).toContainText('5 / 5');
+  await keyboard(page).pressSequentially('l');
+  await expect(page.locator('.normalTutorial')).toHaveCount(0);
 });

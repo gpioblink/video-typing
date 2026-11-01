@@ -47,3 +47,13 @@
 .normalPractice .playerHeader > div:first-child { flex: 1; min-width: 0; }
 .normalPractice .playerHeader p { max-width: 100%; }
 .normalPractice .playerHeader .playerActions { flex-wrap: nowrap; flex-shrink: 0; align-items: center; }
+
+.headerLinks { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.extensionStoreLink { position: static; }
+.iconTooltip { display: none; position: absolute; top: calc(100% + 8px); right: 0; z-index: 10; width: max-content; max-width: min(300px, calc(100vw - 24px)); padding: 9px 12px; background: #24353d; border: 1px solid #63766e; border-radius: 6px; color: #edf2ef; font: 13px/1.6 system-ui, sans-serif; text-align: left; box-shadow: 0 6px 20px #0008; }
+.extensionStoreLink:hover .iconTooltip, .extensionStoreLink:focus-visible .iconTooltip { display: block; }
+.deviceNotice { color: #e9dec3; border-color: #75684e; font-size: 13px; line-height: 1.65; }
+.deviceNotice p { margin: 0; }
+.deviceNotice p + p { margin-top: 6px; }
+.normalPractice .playerHeader h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media(max-width:700px) { .demoHeader h1 { font-size: 20px; } }
