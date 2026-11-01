@@ -1,7 +1,7 @@
-English subtitles for the recommended Blender Open Movies
-========================================================
+English and Japanese subtitles for the recommended Blender Open Movies
+=====================================================================
 
-These English subtitle files are redistributed under Creative Commons
+These English and Japanese subtitle files are redistributed under Creative Commons
 Attribution 3.0 Unported (CC BY 3.0). Sharing and adaptation are permitted
 under that licence, including its attribution requirements.
 Licence: https://creativecommons.org/licenses/by/3.0/
@@ -24,12 +24,25 @@ Changes to subtitle file: none; original bytes and timestamps preserved.
 SHA-256: 4ed7e1f1bc5ff69fe33606960e4c048ba6766237bf33b132fef76e1a92cb64b2
 Size: 1,514 bytes; 26 cues.
 
+Original Japanese subtitle:
+https://download.blender.org/durian/subs/sintel_jp.srt
+Official subtitle directory linked by the download page:
+https://download.blender.org/durian/subs/
+Local file: sintel-ja.srt
+Changes to subtitle file: none; original bytes and timestamps preserved.
+SHA-256: 865182d78d9d5df40192df19a1d0d91addcab91567bce08f7736bd9cd4086f0a
+Size: 1,750 bytes; 26 cues.
+Attribution is the same Blender Foundation credit above. The distributed
+file does not identify a separate translator or contain a separate licence.
+All 26 cue time ranges match the official English SRT exactly, so the
+Japanese display track uses offset 0 for the same verified YouTube upload.
+
 Primary licensing evidence: https://durian.blender.org/sharing/
 This official project policy licenses the project results, all data
 published online/on DVD, and website contents under CC BY 3.0, except for
 identified exceptions such as logos and unrelated third-party material.
-The English SRT is directly linked by the official download page and has
-no separate restrictive notice. For reuse other than redistributing the
+The English SRT and Japanese subtitle directory are linked by the official
+download page and have no separate restrictive notice. For reuse other than redistributing the
 movie itself, the policy specifies the Blender Foundation attribution
 given above. Full movie credits remain available on the original upload.
 
@@ -46,12 +59,28 @@ Changes to subtitle file: none; original bytes and timestamps preserved.
 SHA-256: ce9578f6fe098a5821045a38884b229160f9e7ba27890448a92f5be330c6e6fe
 Size: 4,764 bytes; 76 cues.
 
+Original Japanese subtitle:
+https://download.blender.org/demo/movies/ToS/subtitles/TOS-JP.srt
+Official subtitle directory linked by the download page:
+https://download.blender.org/demo/movies/ToS/subtitles/
+Local file: tears-of-steel-ja.srt
+Changes to subtitle file: none; original bytes and timestamps preserved.
+SHA-256: dae49f0d9231c93a3ca02f02ab08023a4e5379aa8dfa9e22f78bc40d8754ad74
+Size: 4,965 bytes; 76 cues.
+Attribution is the same Blender Foundation credit above. The distributed
+file does not identify a separate translator or contain a separate licence.
+All 10 cue time ranges in the selected 218-249-second practice interval
+match the official English SRT exactly. The Japanese display track uses
+offset 0 for the same verified YouTube upload. Other parts of the Japanese
+track sometimes split or time dialogue differently from English, so each
+display cue must be selected by its own timestamp, not the English index.
+
 Primary licensing evidence: https://mango.blender.org/sharing/
 This official project policy licenses the project results, all data
 published online/on DVD, and website contents under CC BY 3.0, except for
 identified exceptions such as logos and unrelated third-party material.
-The English SRT is directly linked by the official download page and has
-no separate restrictive notice. The policy specifies the Blender
+The English SRT and Japanese subtitle directory are linked by the official
+download page and have no separate restrictive notice. The policy specifies the Blender
 Foundation attribution given above. A separate soundtrack copyright notice
 does not apply to these subtitle files; no soundtrack is redistributed.
 
@@ -67,6 +96,14 @@ Tears of Steel cues 24, 29, and 32 were displayed at 224.99, 237.93, and
 246.73 seconds respectively, all within their published SRT time ranges.
 The catalogue therefore uses zero added subtitle offset for these uploads.
 Other uploads or new editions may require a different offset.
+
+Japanese-track verification (2026-11-01): the exact same official YouTube
+embeds were played with Japanese native captions selected (language ja).
+Sintel Japanese cues 1, 7, and 12 were displayed at 108.65, 130.79, and
+154.83 seconds. Tears of Steel Japanese cues 24, 29, and 32 were displayed
+at 225.15, 238.03, and 246.82 seconds. Each was inside the corresponding
+official Japanese SRT time range. This independently confirms offset 0
+for the selected Japanese practice intervals.
 
 The application selects practice ranges at runtime. It does not rewrite
 the source subtitle text or represent this film dialogue as original text.
