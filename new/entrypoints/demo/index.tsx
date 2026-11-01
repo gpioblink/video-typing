@@ -1,3 +1,2 @@
-import ReactDOM from 'react-dom/client';
-import { QuickPlayApp } from '../../src/components/QuickPlayApp';
-ReactDOM.createRoot(document.getElementById('root')!).render(<QuickPlayApp youtubeEnabled={false} />);
+// MV3 pages cannot load the remote YouTube API. Open the standalone web demo.
+window.location.replace('https://gpioblink.com/video-typing/');

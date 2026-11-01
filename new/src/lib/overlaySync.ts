@@ -1,3 +1,5 @@
+import type { MediaTarget } from './video';
+
 /** Observe actual media time, including seeks while paused. Polling supplements
  * media events; it never substitutes wall clock time for the player's clock. */
 export interface OverlayTimelineSnapshot {
@@ -16,7 +18,7 @@ type TimerScheduler = {
 };
 
 export function observeOverlayTimeline(
-  video: HTMLVideoElement,
+  video: MediaTarget,
   callbacks: {
     onSample: (snapshot: OverlayTimelineSnapshot, event: string) => void;
     onExternalSeek: () => void;
@@ -41,8 +43,10 @@ export function observeOverlayTimeline(
   };
   const onEvent = (event: Event) => {
     if (disposed) return;
+    if (video.isConnected === false) { sample(event.type); return; }
     if (event.type === 'seeking') {
-      if (controlledSeek !== null && Math.abs(video.currentTime - controlledSeek) < 0.25) {
+      const seekDestination = video.pendingSeekTime ?? video.currentTime;
+      if (controlledSeek !== null && Math.abs(seekDestination - controlledSeek) < 0.25) {
         controlledSeek = null;
       } else {
         controlledSeek = null;
@@ -73,7 +77,7 @@ export function observeOverlayTimeline(
   return {
     seek(seconds) {
       if (disposed || !Number.isFinite(seconds)) return;
-      controlledSeek = Math.max(0, seconds);
+      controlledSeek = Math.max(video.seekRange?.start ?? 0, Math.min(video.seekRange?.end ?? Infinity, seconds));
       callbacks.seek(controlledSeek);
     },
     dispose,

@@ -1,3 +1,5 @@
+import { hasExtensionRuntime } from './browserStorage';
+import { searchChineseDictionary, searchDictionary } from './dictionary';
 import type { DictionaryEntry } from '../types';
 
 export async function searchExtensionDictionary(
@@ -5,6 +7,7 @@ export async function searchExtensionDictionary(
   contextText = '',
   requestId = '',
 ): Promise<DictionaryEntry[]> {
+  if (!hasExtensionRuntime()) return searchDictionary(query, 'english', contextText, requestId);
   console.log('[video-typing][hint][client-send]', { requestId, query, contextText });
   const response = await chrome.runtime.sendMessage({
     type: 'videoTypingDictionarySearch',
@@ -31,6 +34,7 @@ export async function searchExtensionChineseDictionary(
   contextText: string,
   requestId = '',
 ): Promise<DictionaryEntry[]> {
+  if (!hasExtensionRuntime()) return searchChineseDictionary(query, contextText);
   console.log('[video-typing][hint][client-send]', { requestId, query, contextText, kind: 'chinese' });
   const response = await chrome.runtime.sendMessage({
     type: 'videoTypingChineseDictionarySearch',

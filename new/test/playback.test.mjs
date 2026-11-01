@@ -158,6 +158,7 @@ class FakeVideo extends EventTarget {
   src = '';
   ownerDocument = { baseURI: 'https://example.test/demo/' };
   paused = true;
+  playbackRate = 1;
   shouldFail = false;
   playError = null;
   load() { if (this.src) queueMicrotask(() => this.dispatchEvent(new Event(this.shouldFail ? 'error' : 'loadedmetadata'))); }
@@ -174,7 +175,12 @@ test('HTML5 adapter loads, seeks, pauses, resumes and releases its media resourc
   adapter.subscribe((event) => events.push(event.type));
   await adapter.load(clip.source, 10, 50);
   assert.equal(video.currentTime, 10);
+  assert.equal(adapter.getDuration(), 60);
+  assert.equal(adapter.isPaused(), true);
+  adapter.setPlaybackRate(0.75);
+  assert.equal(adapter.getPlaybackRate(), 0.75);
   await adapter.play();
+  assert.equal(adapter.isPaused(), false);
   adapter.pause();
   adapter.seek(25);
   assert.equal(adapter.getCurrentTime(), 25);
@@ -216,6 +222,9 @@ function fakeYouTube() {
     pauseVideo() { this.options.events.onStateChange({ data: 2 }); }
     seekTo(seconds) { this.time = seconds; this.options.events.onStateChange({ data: 1 }); }
     getCurrentTime() { return this.time; }
+    getDuration() { return 60; }
+    getPlaybackRate() { return this.rate ?? 1; }
+    setPlaybackRate(rate) { this.rate = rate; }
     getIframe() { return this.iframe; }
     destroy() { this.destroyed = true; }
   }
@@ -243,6 +252,10 @@ test('official YouTube adapter cues bounded video and controller still enforces 
   assert.equal(player.options.playerVars.end, 50);
   assert.equal(player.options.playerVars.controls, 1);
   assert.equal(player.options.playerVars.origin, 'https://example.test');
+  assert.equal(adapter.getDuration(), 60);
+  adapter.setPlaybackRate(0.5);
+  assert.equal(adapter.getPlaybackRate(), 0.5);
+  assert.equal(adapter.isPaused(), false);
   session.pause();
   session.seek(30);
   assert.equal(session.getSnapshot().status, 'paused', 'seekTo resuming playback is corrected');
@@ -443,4 +456,28 @@ test('destroy and source replacement cancel pending YouTube playback without lef
   const destroyed = assert.rejects(adapter.play(), { name: 'AbortError' });
   adapter.destroy();
   await destroyed;
+});
+
+test('normal overlay retains unfinished final-cue loop ownership until typing is complete', async (t) => {
+  const adapter = fakeAdapter();
+  let allTyped = false;
+  const session = new ClipSession(adapter, clip, { pollIntervalMs: 60_000, canComplete: () => allTyped });
+  t.after(() => session.destroy());
+  await session.start();
+  adapter.time = 50;
+  session.tick();
+  assert.equal(session.getSnapshot().status, 'playing');
+  assert.equal(adapter.paused, false, 'no second controller pauses the overlay unfinished loop');
+  assert.equal(adapter.time, 50, 'the session does not implement its own per-cue replay');
+  adapter.paused = true;
+  adapter.emit({ type: 'ended' });
+  assert.equal(session.getSnapshot().status, 'paused');
+  await session.replayCue();
+  assert.equal(adapter.time, 25, 'replaying at the media boundary selects the last cue');
+  assert.equal(session.getSnapshot().status, 'playing');
+  allTyped = true;
+  adapter.time = 50;
+  session.tick();
+  assert.equal(session.getSnapshot().status, 'completed');
+  assert.equal(adapter.paused, true);
 });

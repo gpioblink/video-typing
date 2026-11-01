@@ -1,3 +1,4 @@
+import { localStorageArea } from './browserStorage';
 import type {
   ExternalHistoryItem,
   ID,
@@ -43,13 +44,13 @@ export function createPlaybackPositionStorageKey(storageKey: string, mode: Playb
 }
 
 export async function loadPanelPosition(hostname: string, kind: PanelKind) {
-  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const result = await localStorageArea.get(STORAGE_KEY);
   const positions = (result[STORAGE_KEY] || {}) as StoredPanelPositions;
   return positions[hostname]?.[kind];
 }
 
 export async function savePanelPosition(hostname: string, kind: PanelKind, position: PanelPosition) {
-  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const result = await localStorageArea.get(STORAGE_KEY);
   const positions = (result[STORAGE_KEY] || {}) as StoredPanelPositions;
   const next = {
     ...positions,
@@ -58,17 +59,17 @@ export async function savePanelPosition(hostname: string, kind: PanelKind, posit
       [kind]: position,
     },
   };
-  await chrome.storage.local.set({ [STORAGE_KEY]: next });
+  await localStorageArea.set({ [STORAGE_KEY]: next });
 }
 
 export async function loadPanelSize(hostname: string, kind: PanelKind) {
-  const result = await chrome.storage.local.get(PANEL_SIZE_STORAGE_KEY);
+  const result = await localStorageArea.get(PANEL_SIZE_STORAGE_KEY);
   const sizes = (result[PANEL_SIZE_STORAGE_KEY] || {}) as StoredPanelSizes;
   return sizes[hostname]?.[kind];
 }
 
 export async function savePanelSize(hostname: string, kind: PanelKind, size: PanelSize) {
-  const result = await chrome.storage.local.get(PANEL_SIZE_STORAGE_KEY);
+  const result = await localStorageArea.get(PANEL_SIZE_STORAGE_KEY);
   const sizes = (result[PANEL_SIZE_STORAGE_KEY] || {}) as StoredPanelSizes;
   const next = {
     ...sizes,
@@ -77,30 +78,30 @@ export async function savePanelSize(hostname: string, kind: PanelKind, size: Pan
       [kind]: size,
     },
   };
-  await chrome.storage.local.set({ [PANEL_SIZE_STORAGE_KEY]: next });
+  await localStorageArea.set({ [PANEL_SIZE_STORAGE_KEY]: next });
 }
 
 export async function loadOverlayConfig(): Promise<OverlayConfig> {
-  const result = await chrome.storage.local.get(OVERLAY_CONFIG_STORAGE_KEY);
+  const result = await localStorageArea.get(OVERLAY_CONFIG_STORAGE_KEY);
   return normalizeOverlayConfig(result[OVERLAY_CONFIG_STORAGE_KEY]);
 }
 
 export async function saveOverlayConfig(config: OverlayConfig) {
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [OVERLAY_CONFIG_STORAGE_KEY]: normalizeOverlayConfig(config),
   });
 }
 
 export async function loadStoredSubtitle(url: string) {
-  const result = await chrome.storage.local.get(SUBTITLE_STORAGE_KEY);
+  const result = await localStorageArea.get(SUBTITLE_STORAGE_KEY);
   const subtitles = (result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>;
   return subtitles[url];
 }
 
 export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleData) {
-  const result = await chrome.storage.local.get(SUBTITLE_STORAGE_KEY);
+  const result = await localStorageArea.get(SUBTITLE_STORAGE_KEY);
   const subtitles = (result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>;
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [SUBTITLE_STORAGE_KEY]: {
       ...subtitles,
       [url]: subtitle,
@@ -109,14 +110,14 @@ export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleDa
 }
 
 export async function deleteStoredSubtitle(url: string) {
-  const result = await chrome.storage.local.get(SUBTITLE_STORAGE_KEY);
+  const result = await localStorageArea.get(SUBTITLE_STORAGE_KEY);
   const subtitles = { ...((result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>) };
   delete subtitles[url];
-  await chrome.storage.local.set({ [SUBTITLE_STORAGE_KEY]: subtitles });
+  await localStorageArea.set({ [SUBTITLE_STORAGE_KEY]: subtitles });
 }
 
 export async function loadStoredTypingProgress(url: string) {
-  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
   return normalizeTypingProgress(progress[url]);
 }
@@ -126,10 +127,10 @@ export async function saveStoredTypingProgress(
   frameId: string,
   frameProgress: StoredFrameProgressData,
 ) {
-  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
   const currentUrlProgress = normalizeTypingProgress(progress[url]);
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [PROGRESS_STORAGE_KEY]: {
       ...progress,
       [url]: {
@@ -141,7 +142,7 @@ export async function saveStoredTypingProgress(
 }
 
 export async function deleteStoredFrameTypingProgress(url: string, frameId: string) {
-  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
   const currentUrlProgress = normalizeTypingProgress(progress[url]);
 
@@ -152,7 +153,7 @@ export async function deleteStoredFrameTypingProgress(url: string, frameId: stri
   const nextUrlProgress = { ...currentUrlProgress };
   delete nextUrlProgress[frameId];
 
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [PROGRESS_STORAGE_KEY]: {
       ...progress,
       [url]: nextUrlProgress,
@@ -161,22 +162,22 @@ export async function deleteStoredFrameTypingProgress(url: string, frameId: stri
 }
 
 export async function deleteStoredTypingProgress(url: string) {
-  const result = await chrome.storage.local.get(PROGRESS_STORAGE_KEY);
+  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
   const progress = { ...((result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>) };
   delete progress[url];
-  await chrome.storage.local.set({ [PROGRESS_STORAGE_KEY]: progress });
+  await localStorageArea.set({ [PROGRESS_STORAGE_KEY]: progress });
 }
 
 export async function loadStoredPlaybackPosition(url: string) {
-  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
   const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
   return positions[url];
 }
 
 export async function saveStoredPlaybackPosition(url: string, currentTime: number) {
-  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
   const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [PLAYBACK_STORAGE_KEY]: {
       ...positions,
       [url]: { currentTime },
@@ -185,22 +186,22 @@ export async function saveStoredPlaybackPosition(url: string, currentTime: numbe
 }
 
 export async function deleteStoredPlaybackPosition(url: string) {
-  const result = await chrome.storage.local.get(PLAYBACK_STORAGE_KEY);
+  const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
   const positions = { ...((result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>) };
   delete positions[url];
-  await chrome.storage.local.set({ [PLAYBACK_STORAGE_KEY]: positions });
+  await localStorageArea.set({ [PLAYBACK_STORAGE_KEY]: positions });
 }
 
 export async function loadExternalHistoryMeta(url: string) {
-  const result = await chrome.storage.local.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
+  const result = await localStorageArea.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
   const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
   return meta[url];
 }
 
 export async function saveExternalHistoryMeta(url: string, nextMeta: StoredExternalHistoryMeta) {
-  const result = await chrome.storage.local.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
+  const result = await localStorageArea.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
   const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
-  await chrome.storage.local.set({
+  await localStorageArea.set({
     [EXTERNAL_HISTORY_META_STORAGE_KEY]: {
       ...meta,
       [url]: nextMeta,
@@ -219,7 +220,7 @@ export async function clearStoredSubtitleSetting(url: string) {
 }
 
 export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]> {
-  const result = await chrome.storage.local.get([
+  const result = await localStorageArea.get([
     SUBTITLE_STORAGE_KEY,
     PROGRESS_STORAGE_KEY,
     PLAYBACK_STORAGE_KEY,

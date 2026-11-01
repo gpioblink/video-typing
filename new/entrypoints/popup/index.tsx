@@ -11,6 +11,7 @@ import {
   createUnknownWordCsv,
 } from '../../src/lib/localPlayerReview';
 import { subtitleCueToCaptionFrame } from '../../src/lib/subtitles';
+import { defaultClipRange, validateClipRange, type ClipRange } from '../../src/lib/clipLaunch';
 import type {
   StoredSubtitleData,
   StoredTypingProgressData,
@@ -53,12 +54,18 @@ function PopupApp() {
     status: '',
   });
   const [showSubtitles, setShowSubtitles] = useState(false);
+  const [clipStart, setClipStart] = useState('0');
+  const [clipEnd, setClipEnd] = useState('45');
+  const [isStarting, setIsStarting] = useState(false);
 
   const loadState = useCallback(async (status = '') => {
     setState((current) => ({ ...current, loading: true, status }));
 
     try {
       const context = await loadCurrentTabContext();
+      const range = defaultClipRange(context.video?.currentTime ?? 0, context.video?.duration ?? 0);
+      setClipStart(String(Number(range.start.toFixed(3))));
+      setClipEnd(String(Number(range.end.toFixed(3))));
       const [subtitle, typingProgress] = await Promise.all([
         loadStoredSubtitle(context.url),
         loadStoredTypingProgress(context.url),
@@ -97,18 +104,21 @@ function PopupApp() {
   const gameStartedAt = useMemo(() => getGameStartedAt(state.typingProgress), [state.typingProgress]);
   const shouldShowOfflineHistoryButton = !state.loading && !state.context?.video?.hasVideo;
 
-  const startOverlay = async (mode: 'typing' | 'type-review') => {
+  const startOverlay = async (mode: 'typing' | 'type-review', range?: ClipRange) => {
     if (!state.context) {
       setState((current) => ({ ...current, status: 'No active tab found.' }));
       return;
     }
 
+    setIsStarting(true);
     try {
+      const selectedRange = range === undefined ? undefined : validateClipRange(range);
       const response = await chrome.runtime.sendMessage({
         type: 'videoTypingStartOverlay',
         tabId: state.context.tabId,
         url: state.context.url,
         mode,
+        range: selectedRange,
       });
 
       if (!response?.ok) {
@@ -121,7 +131,7 @@ function PopupApp() {
         ...current,
         status: error instanceof Error ? error.message : 'Failed to start video-typing.',
       }));
-    }
+    } finally { setIsStarting(false); }
   };
 
   const openOfflineGameHistory = () => {
@@ -197,7 +207,7 @@ function PopupApp() {
         <button className="button primary" type="button" onClick={() => {
           void chrome.tabs.create({ url: chrome.runtime.getURL('demo.html') });
           window.close();
-        }}>おすすめをすぐプレイ · 40秒</button>
+        }}>おすすめクリップを選ぶ（Webデモ）</button>
       </section>
 
       <section>
@@ -219,6 +229,19 @@ function PopupApp() {
           </div>
         </div>
       </section>
+
+      {state.context?.video?.hasVideo && <section>
+        <h2 className="sectionTitle">現在の動画で短く練習</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <label>開始秒<input aria-label="クリップ開始秒" type="number" min="0" step="0.001" value={clipStart} onChange={event => setClipStart(event.target.value)} style={{ width: 100, display: 'block' }} /></label>
+          <label>終了秒<input aria-label="クリップ終了秒" type="number" min="0" step="0.001" value={clipEnd} onChange={event => setClipEnd(event.target.value)} style={{ width: 100, display: 'block' }} /></label>
+        </div>
+        <p className="metaLine">最大90秒。登録済みの字幕を使います。Netflixでは既存の字幕自動取得も使えます。</p>
+        <button className="button" type="button" disabled={state.loading || isStarting} onClick={() => {
+          if (!clipStart.trim() || !clipEnd.trim()) { setState(current => ({ ...current, status: '開始・終了秒を指定してください。' })); return; }
+          void startOverlay('typing', { start: Number(clipStart), end: Number(clipEnd) });
+        }}>この区間を通常画面で開く</button>
+      </section>}
 
       {hasProgress ? (
         <section className="progressBox">

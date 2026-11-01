@@ -21,6 +21,9 @@ import { observeOverlayTimeline, shouldReplayOverlayLoop, type OverlayTimelineOb
 import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
+  PanelKind,
+  PanelPosition,
+  PanelSize,
   OverlayConfig,
   StoredFrameProgressData,
   StoredTypingProgressData,
@@ -47,6 +50,11 @@ interface Props {
     label: string;
   }>;
   showDebugPanel?: boolean;
+  playbackRange?: { start: number; end: number };
+  panelDefaults?: Partial<Record<PanelKind, { position: PanelPosition; size: PanelSize }>>;
+  onTypingProgressChange?: (progress: StoredTypingProgressData) => void;
+  onReplay?: () => void;
+  showClipResult?: boolean;
   typeReviewMode?: boolean;
   onNativeCueReplay?: (cue: SubtitleCue) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
@@ -84,6 +92,11 @@ function OverlaySession({
   displaySubtitleFileName,
   netflixSubtitleTracks,
   showDebugPanel = true,
+  playbackRange,
+  panelDefaults,
+  onTypingProgressChange,
+  onReplay,
+  showClipResult = false,
   typeReviewMode = false,
   onNativeCueReplay,
   onFrameCompleted,
@@ -99,8 +112,8 @@ function OverlaySession({
     console.log('[video-typing][hint][runtime-start]', {
       surface: 'overlay',
       buildId: HINT_DEBUG_BUILD_ID,
-      extensionId: chrome.runtime.id,
-      manifestVersion: chrome.runtime.getManifest().version,
+      extensionId: typeof chrome !== 'undefined' ? chrome.runtime?.id : undefined,
+      manifestVersion: typeof chrome !== 'undefined' ? chrome.runtime?.getManifest?.().version : undefined,
       pageUrl,
     });
   }, [pageUrl]);
@@ -109,6 +122,7 @@ function OverlaySession({
   const subtitleFileName = initialSubtitleFileName;
   const typingFrames = initialTypingFrames;
   const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
+  useEffect(() => { onTypingProgressChange?.(typingProgress); }, [typingProgress, onTypingProgressChange]);
   const [config, setConfig] = useState<OverlayConfig>(DEFAULT_OVERLAY_CONFIG);
   const [nativeSubtitleState, setNativeSubtitleState] = useState<{
     fileName?: string;
@@ -119,6 +133,11 @@ function OverlaySession({
   });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [clipComplete, setClipComplete] = useState(false);
+  const clipCompleteRef = useRef(false);
+  const allProgressRef = useRef(typingProgress);
+  allProgressRef.current = typingProgress;
   const [isVideoAvailable, setIsVideoAvailable] = useState(true);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
@@ -274,13 +293,14 @@ function OverlaySession({
       });
   }, [applyMistakeSensitivePlaybackRate, restoreControlledPlaybackRate]);
 
-  const seekTo = useCallback((seconds: number) => {
+  const seekTo = useCallback((requestedSeconds: number) => {
+    const seconds = playbackRange ? Math.max(playbackRange.start, Math.min(playbackRange.end, requestedSeconds)) : requestedSeconds;
     if (timelineObserverRef.current) {
       timelineObserverRef.current.seek(seconds);
     } else {
       seekVideo(targetId, seconds);
     }
-  }, [targetId]);
+  }, [targetId, playbackRange]);
 
   useEffect(() => {
     return () => {
@@ -436,7 +456,18 @@ function OverlaySession({
         releaseLoop();
       },
       onSample: (snapshot, event) => {
+        setIsPlaying(!video.paused);
         if (event === 'loadedmetadata') setIsVideoAvailable(true);
+        if (showClipResult && playbackRange && snapshot.currentTime >= playbackRange.end && !clipCompleteRef.current) {
+          const frames = typingFrames || subtitleCues.map(cue => ({ ...subtitleCueToCaptionFrame(cue), start: cue.start, end: cue.end }));
+          if (frames.every(frame => frame.caption.filter(char => char.isTypeable).every(char => allProgressRef.current[frame.id]?.finishedCharIds.includes(char.id)))) {
+            clipCompleteRef.current = true;
+            loopRangeRef.current = null;
+            video.pause();
+            setClipComplete(true);
+            return;
+          }
+        }
         const loopRange = loopRangeRef.current;
         if (loopRange && shouldReplayOverlayLoop(
           snapshot.currentTime, snapshot.duration, loopRange.end,
@@ -464,7 +495,7 @@ function OverlaySession({
       observer.dispose();
       timelineObserverRef.current = null;
     };
-  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId]);
+  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId, playbackRange, showClipResult, subtitleCues, typingFrames]);
 
   useEffect(() => () => {
     nativeReplayGenerationRef.current += 1;
@@ -516,8 +547,8 @@ function OverlaySession({
 
     const loopPadding = typeReviewMode ? 0 : LOOP_START_PADDING_SECONDS;
     const loopEndPadding = typeReviewMode ? 0 : LOOP_END_PADDING_SECONDS;
-    const loopStart = Math.max(0, activeCue.start - loopPadding);
-    const loopEnd = activeCue.end + loopEndPadding;
+    const loopStart = Math.max(playbackRange?.start ?? 0, activeCue.start - loopPadding);
+    const loopEnd = Math.min(playbackRange?.end ?? Infinity, activeCue.end + loopEndPadding);
 
     loopRangeRef.current = {
       start: loopStart,
@@ -534,6 +565,7 @@ function OverlaySession({
     restoreControlledPlaybackRate,
     subtitleCues,
     typeReviewMode,
+    playbackRange,
   ]);
 
   useEffect(() => {
@@ -1027,12 +1059,17 @@ function OverlaySession({
         <DraggablePanel
           kind="typing"
           title="Typing"
-          defaultPosition={{ x: 24, y: 220 }}
-          defaultSize={{ width: 760, height: 260 }}
+          defaultPosition={panelDefaults?.typing?.position || { x: 24, y: 220 }}
+          defaultSize={panelDefaults?.typing?.size || { width: 760, height: 260 }}
           titleBackground={isTypingCueActive ? '#1f7a3a' : '#162229'}
         >
           {!isVideoAvailable ? <p role="status">動画を読み込めません。動画を開き直してください。</p> : null}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <button type="button" onClick={() => { const video = getVideoElement(targetId); if (!video) return; if (video.paused) void video.play().catch(() => undefined); else video.pause(); }}>{isPlaying ? '一時停止' : '再生する'}</button>
+            <button type="button" disabled={!activeCue} onClick={() => { if (!activeCue) return; seekTo(activeCue.start); const video = getVideoElement(targetId); if (video) void video.play().then(() => { if (!video.paused) onReplay?.(); }).catch(() => undefined); }}>聞き直す</button>
+          </div>
           <Window
+            key={`${activeFrame.id}:${activeFrameResetRevision}`}
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
             resetRevision={activeFrameResetRevision}
@@ -1056,8 +1093,8 @@ function OverlaySession({
         <DraggablePanel
           kind="hint"
           title="Hint"
-          defaultPosition={{ x: 700, y: 120 }}
-          defaultSize={{ width: 360, height: 400 }}
+          defaultPosition={panelDefaults?.hint?.position || { x: 700, y: 120 }}
+          defaultSize={panelDefaults?.hint?.size || { width: 360, height: 400 }}
         >
           <Hint
             words={hintWords}
@@ -1069,8 +1106,10 @@ function OverlaySession({
           <DraggablePanel
             kind="config"
             title="Config"
-            defaultPosition={{ x: 24, y: 24 }}
-            defaultSize={{ width: 380, height: 520 }}
+            defaultPosition={panelDefaults?.config?.position || { x: 24, y: 24 }}
+            defaultSize={panelDefaults?.config?.size || { width: 380, height: 520 }}
+            minimizable
+            defaultMinimized
           >
             <ConfigPanel
               config={config}
@@ -1092,14 +1131,18 @@ function OverlaySession({
         <DraggablePanel
           kind="subtitle"
           title="Subtitle"
-          defaultPosition={{ x: 180, y: 520 }}
-          defaultSize={{ width: 520, height: 180 }}
+          defaultPosition={panelDefaults?.subtitle?.position || { x: 180, y: 520 }}
+          defaultSize={panelDefaults?.subtitle?.size || { width: 520, height: 180 }}
         >
           <SubtitlePanel
             cueText={displayCue?.text || ''}
             fileName={nativeSubtitleState.fileName || subtitleFileName}
           />
         </DraggablePanel>
+        {clipComplete && playbackRange ? <div role="status" style={{ position: 'fixed', left: 24, bottom: 24, pointerEvents: 'auto', padding: 20, background: '#162229', color: '#ecf2f1', borderRadius: 10 }}>
+          <h2>クリップ完走</h2>
+          <button type="button" onClick={() => { clipCompleteRef.current = false; setClipComplete(false); setTypingProgress({}); setLoopCue(null); setActiveFrameResetRevision(revision => revision + 1); seekTo(playbackRange.start); void getVideoElement(targetId)?.play().catch(() => undefined); }}>この区間を再挑戦</button>
+        </div> : null}
         {praise ? <PraiseOverlay key={praise.id} text={praise.text} /> : null}
       </div>
     </CacheProvider>

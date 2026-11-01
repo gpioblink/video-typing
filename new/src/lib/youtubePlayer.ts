@@ -12,6 +12,9 @@ export interface YouTubePlayer {
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number;
+  getDuration(): number;
+  getPlaybackRate(): number;
+  setPlaybackRate(rate: number): void;
   getIframe(): HTMLIFrameElement;
   destroy(): void;
 }
@@ -234,7 +237,13 @@ export function createYouTubeAdapter(
     seek(seconds) {
       if (!destroyed && Number.isFinite(seconds)) player?.seekTo(Math.max(0, seconds), true);
     },
-    getCurrentTime() { return destroyed ? 0 : player?.getCurrentTime() ?? 0; },
+    getCurrentTime() { return destroyed ? 0 : player?.getCurrentTime?.() ?? 0; },
+    getDuration() { return destroyed ? 0 : player?.getDuration?.() ?? 0; },
+    isPaused() { return destroyed || !playing; },
+    getPlaybackRate() { return destroyed ? 1 : player?.getPlaybackRate?.() ?? 1; },
+    setPlaybackRate(rate) {
+      if (!destroyed && Number.isFinite(rate) && rate > 0) player?.setPlaybackRate?.(rate);
+    },
     subscribe(listener) {
       if (!destroyed) listeners.add(listener);
       return () => { listeners.delete(listener); };

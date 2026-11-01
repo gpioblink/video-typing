@@ -29,6 +29,7 @@ import {
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import { seekVideo } from '../src/lib/video';
+import { createClipStorageKey, selectSubtitleForClip, validateClipRange, type ClipRange } from '../src/lib/clipLaunch';
 import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
@@ -53,6 +54,7 @@ declare global {
     };
     __videoTypingPrototypeLaunchOptions__?: {
       mode?: 'typing' | 'type-review';
+      range?: ClipRange;
     };
   }
 }
@@ -68,20 +70,32 @@ export default defineContentScript({
     const pageUrl = window.location.href;
     const isNetflixPage = isNetflixHostname(window.location.hostname);
     const requestedTypeReviewMode = launchOptions.mode === 'type-review';
+    let range: ClipRange | undefined;
+    try {
+      range = launchOptions.range === undefined ? undefined : validateClipRange(launchOptions.range);
+      if (range && requestedTypeReviewMode) throw new Error('区間の起動は通常のタイピングで行ってください。');
+    } catch (error) { showToast((error as Error).message); return; }
 
     if (!video) {
       showToast('No video tag found on this page.');
       return;
     }
 
+    if (range && video.readyState >= 1 && Number.isFinite(video.duration) && range.end > video.duration + 0.25) {
+      showToast('終了秒が動画の長さを超えています。');
+      return;
+    }
+    const progressStorageKey = range ? createClipStorageKey(pageUrl, range) : pageUrl;
     const playbackStorageKey = createPlaybackPositionStorageKey(
-      pageUrl,
+      progressStorageKey,
       requestedTypeReviewMode ? 'type-review' : 'typing',
     );
     const storedPlaybackPosition = await loadStoredPlaybackPosition(playbackStorageKey);
     const storedSubtitle = await loadStoredSubtitle(pageUrl);
-    const storedTypingProgress = await loadStoredTypingProgress(pageUrl);
-    let subtitleFile = storedSubtitle || await requestSubtitleFile({ allowNetflixAuto: isNetflixPage });
+    const storedTypingProgress = await loadStoredTypingProgress(progressStorageKey);
+    let subtitleFile = storedSubtitle || (range && isNetflixPage
+      ? await requestNetflixAutoSubtitleFile() || await requestSubtitleFile({ allowNetflixAuto: true })
+      : await requestSubtitleFile({ allowNetflixAuto: isNetflixPage }));
     let typingProgress = storedTypingProgress;
     let typeReviewMode = false;
 
@@ -119,13 +133,18 @@ export default defineContentScript({
       typeReviewMode = true;
     }
 
+    if (range) {
+      try { subtitleFile = selectSubtitleForClip(subtitleFile, range); }
+      catch (error) { showToast((error as Error).message); return; }
+    }
+
     await saveExternalHistoryMeta(pageUrl, {
       title: document.title || pageUrl,
       updatedAt: Date.now(),
     });
 
     if (!storedSubtitle) {
-      await saveStoredSubtitle(pageUrl, subtitleFile);
+      await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
     }
 
     const previousTargetId = video.getAttribute(VIDEO_ATTR);
@@ -142,13 +161,21 @@ export default defineContentScript({
     if (subtitleFile.netflix?.englishAudioTrackId) {
       void setNetflixAudioTrack(subtitleFile.netflix.englishAudioTrackId).catch(() => undefined);
     }
-    await restorePlaybackPosition(
-      video,
-      targetId,
-      typeReviewMode
-        ? storedPlaybackPosition?.currentTime ?? subtitleFile.cues[0]?.start
-        : getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime,
-    );
+    try {
+      await restorePlaybackPosition(
+        video,
+        targetId,
+        range?.start ?? (typeReviewMode
+          ? storedPlaybackPosition?.currentTime ?? subtitleFile.cues[0]?.start
+          : getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime),
+        range,
+      );
+    } catch (error) {
+      video.removeAttribute(VIDEO_ATTR);
+      video.removeAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR);
+      showToast((error as Error).message);
+      return;
+    }
 
     const ui = await createShadowRootUi(ctx, {
       name: 'video-typing-overlay',
@@ -229,7 +256,9 @@ export default defineContentScript({
               };
               await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
             }}
-            pageUrl={pageUrl}
+            pageUrl={progressStorageKey}
+            playbackRange={range}
+            showClipResult={Boolean(range)}
             playbackStorageKey={playbackStorageKey}
             shadowRoot={container.getRootNode() as ShadowRoot}
             targetId={targetId}
@@ -258,6 +287,7 @@ export default defineContentScript({
     };
 
     ui.mount();
+    if (range) void video.play().catch(() => showToast('動画の再生ボタンを押して練習を始めてください。'));
 
     window.addEventListener('pagehide', persistExternalHistoryMeta, { once: true });
   },
@@ -390,12 +420,13 @@ async function requestChineseTypingJsonFiles(fileName: string, text: string): Pr
   }
 }
 
-async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string, currentTime?: number) {
+async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string, currentTime?: number, range?: ClipRange) {
   if (currentTime == null || !Number.isFinite(currentTime)) {
     return;
   }
 
   const apply = () => {
+    if (range && Number.isFinite(video.duration) && range.end > video.duration + 0.25) throw new Error('終了秒が動画の長さを超えています。');
     const duration = Number.isFinite(video.duration) ? video.duration : currentTime;
     seekVideo(targetId, Math.min(currentTime, duration));
   };
@@ -405,14 +436,20 @@ async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    const onLoadedMetadata = () => {
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      apply();
-      resolve();
+      video.removeEventListener('error', onError);
     };
-
+    const onLoadedMetadata = () => {
+      cleanup();
+      try { apply(); resolve(); } catch (error) { reject(error); }
+    };
+    const onError = () => { cleanup(); reject(new Error('動画を読み込めませんでした。')); };
+    const timeout = setTimeout(() => { cleanup(); reject(new Error('動画の読み込みがタイムアウトしました。')); }, 15_000);
     video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    video.addEventListener('error', onError, { once: true });
   });
 }
 

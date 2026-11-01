@@ -4,7 +4,7 @@ export type PlaybackSource =
   | { kind: 'youtube'; videoId: string };
 
 export interface PlaybackEvent {
-  type: 'ready' | 'playing' | 'paused' | 'ended' | 'buffering' | 'time' | 'blocked' | 'error';
+  type: 'ready' | 'playing' | 'paused' | 'ended' | 'buffering' | 'time' | 'seeking' | 'seeked' | 'durationchange' | 'ratechange' | 'blocked' | 'error';
   message?: string;
 }
 
@@ -14,6 +14,10 @@ export interface PlaybackAdapter {
   pause(): void;
   seek(seconds: number): void;
   getCurrentTime(): number;
+  getDuration(): number;
+  isPaused(): boolean;
+  getPlaybackRate(): number;
+  setPlaybackRate(rate: number): void;
   destroy(): void;
   subscribe(listener: (event: PlaybackEvent) => void): () => void;
 }
@@ -44,7 +48,10 @@ export function createHtml5Adapter(video: HTMLVideoElement): PlaybackAdapter {
     ['ended', () => emit({ type: 'ended' })],
     ['waiting', () => emit({ type: 'buffering' })],
     ['timeupdate', () => emit({ type: 'time' })],
-    ['seeked', () => emit({ type: 'time' })],
+    ['seeking', () => emit({ type: 'seeking' })],
+    ['seeked', () => emit({ type: 'seeked' })],
+    ['durationchange', () => emit({ type: 'durationchange' })],
+    ['ratechange', () => emit({ type: 'ratechange' })],
     ['error', () => emit({ type: 'error', message: `Video could not be loaded (media error ${video.error?.code ?? 'unknown'}).` })],
   ];
   events.forEach(([name, handler]) => video.addEventListener(name, handler));
@@ -116,6 +123,12 @@ export function createHtml5Adapter(video: HTMLVideoElement): PlaybackAdapter {
       emit({ type: 'time' });
     },
     getCurrentTime() { return destroyed ? 0 : video.currentTime; },
+    getDuration() { return destroyed || !Number.isFinite(video.duration) ? 0 : video.duration; },
+    isPaused() { return destroyed || video.paused; },
+    getPlaybackRate() { return destroyed ? 1 : video.playbackRate; },
+    setPlaybackRate(rate) {
+      if (!destroyed && Number.isFinite(rate) && rate > 0) video.playbackRate = rate;
+    },
     subscribe(listener) {
       if (!destroyed) listeners.add(listener);
       return () => listeners.delete(listener);
@@ -158,14 +171,16 @@ export class ClipSession {
   private playRevision = 0;
   private adapter: PlaybackAdapter;
   private clip: PlaybackClip;
+  private canComplete: () => boolean;
 
   constructor(
     adapter: PlaybackAdapter,
     clip: PlaybackClip,
-    options: { pollIntervalMs?: number } = {},
+    options: { pollIntervalMs?: number; canComplete?: () => boolean } = {},
   ) {
     this.adapter = adapter;
     this.clip = clip;
+    this.canComplete = options.canComplete ?? (() => true);
     validatePlaybackRange(clip.start, clip.end);
     if (!clip.cues.length || clip.cues.some((cue, index) => (
       !Number.isFinite(cue.start) || !Number.isFinite(cue.end)
@@ -210,7 +225,13 @@ export class ClipSession {
     } else if (event.type === 'ended') {
       const time = this.adapter.getCurrentTime();
       if (time < this.clip.end - 0.25) this.update({ status: 'error', error: 'Video ended before the clip finished.' });
-      else this.complete();
+      else if (this.canComplete()) this.complete();
+      else {
+        // The normal OverlayApp owns unfinished cue loops, including at the
+        // media boundary. Let its ended handler replay without completing.
+        ++this.playRevision;
+        this.update({ status: 'paused' });
+      }
     } else if (this.snapshot.status !== 'completed') {
       if (event.type === 'playing') this.update({ status: 'playing' });
       if (event.type === 'paused') {
@@ -231,7 +252,7 @@ export class ClipSession {
     if (this.destroyed || ['idle', 'loading', 'error', 'completed'].includes(this.snapshot.status)) return;
     const time = this.adapter.getCurrentTime();
     if (!Number.isFinite(time)) return;
-    if (time >= this.clip.end - 0.04) {
+    if (time >= this.clip.end - 0.04 && this.canComplete()) {
       this.complete();
       return;
     }
@@ -303,7 +324,9 @@ export class ClipSession {
 
   async replayCue() {
     if (this.destroyed) return;
-    const cue = this.clip.cues[this.snapshot.cueIndex] ?? this.clip.cues[0];
+    const cue = this.clip.cues[this.snapshot.cueIndex]
+      ?? [...this.clip.cues].reverse().find((item) => item.start <= this.snapshot.currentTime)
+      ?? this.clip.cues[0];
     this.seek(cue.start);
     await this.play();
   }

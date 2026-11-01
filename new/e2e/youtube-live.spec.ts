@@ -1,30 +1,50 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { RECOMMENDED_VIDEOS } from '../src/data/recommendedVideos';
 
-// Opt in with pnpm test:youtube; this uses the real external service, never an API stub.
-test('real official YouTube stream synchronizes native controls and segment ending', async ({ page }) => {
+// Opt-in live service test. No transcript service or replacement player.
+for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} normal learning UI`, async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'サンプルを開く', exact: true }).click();
-  await expect(page.locator('.quickTarget')).toHaveText('Watch and listen.', { timeout: 20_000 });
-  await page.waitForTimeout(6000);
-  const frame = page.frames().find(item => item.url().includes('youtube.com/embed/'));
+  await page.getByRole('button', { name: new RegExp(video.title) }).click();
+  await page.getByRole('button', { name: '開く', exact: true }).click();
+  const typing = page.getByRole('region', { name: 'Typing', exact: true });
+  const subtitle = page.getByRole('region', { name: 'Subtitle', exact: true }).locator('div').last();
+  await expect(typing).toBeVisible({ timeout: 20_000 });
+  const frame = page.frames().find(item => item.url().includes('youtube.com/embed/'))!;
   expect(frame).toBeDefined();
-  const nativePlay = frame!.getByRole('button', { name: 'Play video', exact: true });
+  await page.waitForTimeout(6000);
+  const nativePlay = frame.getByRole('button', { name: 'Play video', exact: true });
   if (await nativePlay.isVisible()) await nativePlay.click();
-  const playerState = () => frame!.evaluate(() => (document.getElementById('movie_player') as any).getPlayerState());
-  const mediaTime = () => frame!.evaluate(() => document.querySelector('video')!.currentTime);
-  await expect.poll(playerState, { timeout: 20_000 }).toBe(1);
-  await expect.poll(() => page.locator('.quickTime').innerText(), { timeout: 15_000 }).not.toBe('0 / 40 秒');
-  await page.getByRole('button', { name: '一時停止', exact: true }).click();
-  await expect.poll(playerState).toBe(2);
-  const paused = await mediaTime();
+  const state = () => frame.evaluate(() => (document.getElementById('movie_player') as any).getPlayerState());
+  await expect.poll(state, { timeout: 20_000 }).toBe(1);
+  await typing.getByRole('button', { name: '一時停止', exact: true }).click();
+  await expect.poll(state).toBe(2);
+  const paused = await frame.evaluate(() => document.querySelector('video')!.currentTime);
   await page.waitForTimeout(500);
-  expect(Math.abs(await mediaTime() - paused)).toBeLessThan(0.2);
-  await frame!.evaluate(() => (document.getElementById('movie_player') as any).seekTo(21, true));
-  await expect(page.locator('.quickTarget')).toHaveText('Practice at your own pace.', { timeout: 10_000 });
-  await page.getByRole('button', { name: '聞き直す', exact: true }).click();
-  await expect.poll(playerState, { timeout: 10_000 }).toBe(1);
-  await expect.poll(mediaTime).toBeLessThan(21);
-  await frame!.evaluate(() => (document.getElementById('movie_player') as any).seekTo(38, true));
-  await expect(page.getByRole('heading', { name: '40秒、完走！' })).toBeVisible({ timeout: 15_000 });
-  expect(await frame!.evaluate(() => document.querySelector('video')!.paused)).toBe(true);
+  expect(Math.abs(await frame.evaluate(() => document.querySelector('video')!.currentTime) - paused)).toBeLessThan(0.2);
+  await typing.getByRole('button', { name: '再生する', exact: true }).click();
+  await expect.poll(state).toBe(1);
+  const text = readFileSync(resolve('public', video.subtitle.url), 'utf8');
+  const seconds = (time: string) => { const [h, m, s] = time.trim().replace(',', '.').split(':').map(Number); return h * 3600 + m * 60 + s; };
+  const range = video.clips[0]; let cueIndex = 0;
+  for (const block of text.trim().split(/\r?\n\s*\r?\n/)) {
+    const lines = block.split(/\r?\n/); const i = lines.findIndex(line => line.includes('-->')); if (i < 0) continue;
+    const [start, end] = lines[i].split('-->').map(seconds);
+    if (start >= range.end || end <= range.start) continue;
+    const cueText = lines.slice(i + 1).join('\n');
+    await frame.evaluate(time => (document.getElementById('movie_player') as any).seekTo(time, true), Math.max(start, range.start) + 0.1);
+    await expect(subtitle).toHaveText(cueText, { timeout: 10_000 });
+    const keyboard = typing.locator('[tabindex="0"]'); await keyboard.focus();
+    const letters = cueText.replace(/\[[^\]]*\]|\([^)]*\)/g, '').replace(/[^A-Za-z]/g, '');
+    await keyboard.pressSequentially(letters, { delay: 15 });
+    await expect(keyboard.locator('.finished')).toHaveCount(letters.length);
+    if (cueIndex++ === 0) {
+      await typing.getByRole('button', { name: '聞き直す', exact: true }).click();
+      await expect.poll(state).toBe(1);
+    }
+  }
+  await frame.evaluate(time => (document.getElementById('movie_player') as any).seekTo(time, true), range.end - 0.15);
+  await expect(page.getByRole('heading', { name: 'クリップ完走', exact: true })).toBeVisible({ timeout: 15_000 });
+  expect(await frame.evaluate(() => document.querySelector('video')!.paused)).toBe(true);
 });

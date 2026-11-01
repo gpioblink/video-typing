@@ -13,6 +13,8 @@ interface Props {
   defaultPosition: PanelPosition;
   defaultSize: PanelSize;
   titleBackground?: string;
+  minimizable?: boolean;
+  defaultMinimized?: boolean;
   children: React.ReactNode;
 }
 
@@ -25,11 +27,17 @@ export function DraggablePanel({
   defaultPosition,
   defaultSize,
   titleBackground = '#162229',
+  minimizable = false,
+  defaultMinimized = false,
   children,
 }: Props) {
   const hostname = window.location.hostname;
   const [position, setPosition] = useState(defaultPosition);
   const [size, setSize] = useState(defaultSize);
+  const [isMinimized, setIsMinimized] = useState(defaultMinimized);
+  const minimized = minimizable && isMinimized;
+  const minimizedRef = useRef(minimized);
+  minimizedRef.current = minimized;
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef(size);
@@ -101,14 +109,14 @@ export function DraggablePanel({
   useEffect(() => {
     const panelElement = panelRef.current;
 
-    if (!panelElement) {
+    if (!panelElement || minimized) {
       return;
     }
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
 
-      if (!entry) {
+      if (!entry || minimizedRef.current) {
         return;
       }
 
@@ -137,7 +145,7 @@ export function DraggablePanel({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [hostname, kind]);
+  }, [hostname, kind, minimized]);
 
   useEffect(() => {
     const onWindowResize = () => {
@@ -160,21 +168,24 @@ export function DraggablePanel({
   return (
     <div
       ref={panelRef}
+      role="region"
+      aria-label={title}
+      data-panel-kind={kind}
       style={{
         position: 'fixed',
         left: position.x,
         top: position.y,
         pointerEvents: 'auto',
         width: size.width,
-        height: size.height,
+        height: minimized ? 'auto' : size.height,
         minWidth: `${MIN_PANEL_WIDTH}px`,
-        minHeight: `${MIN_PANEL_HEIGHT}px`,
+        minHeight: minimized ? 0 : `${MIN_PANEL_HEIGHT}px`,
         background: '#24353d',
         color: '#ecf2f1',
         borderRadius: '14px',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.35)',
         overflow: 'hidden',
-        resize: 'both',
+        resize: minimized ? 'none' : 'both',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -197,11 +208,29 @@ export function DraggablePanel({
           textTransform: 'uppercase',
           background: titleBackground,
           userSelect: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+          flexShrink: 0,
         }}
       >
-        {title}
+        <span>{title}</span>
+        {minimizable ? <button
+          type="button"
+          aria-label={`${title}を${minimized ? '開く' : '折りたたむ'}`}
+          aria-expanded={!minimized}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => setIsMinimized((value) => !value)}
+          style={{
+            appearance: 'none', border: '1px solid rgba(236, 242, 241, 0.25)',
+            borderRadius: '4px', background: 'transparent', color: 'inherit',
+            padding: '0 6px', font: 'inherit', cursor: 'pointer', lineHeight: '18px',
+          }}
+        >{minimized ? '+' : '−'}</button> : null}
       </div>
       <div
+        hidden={minimized}
         style={{
           padding: kind === 'typing' ? '16px 18px' : '12px',
           overflow: 'auto',
