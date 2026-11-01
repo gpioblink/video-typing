@@ -488,6 +488,8 @@ function NormalPractice({
   onRetry: () => void;
 }) {
   const { clip } = practice;
+  const practiceRef = useRef<HTMLElement>(null);
+  const focusTyping = () => practiceRef.current?.querySelector<HTMLElement>('[data-typing-keyboard]')?.focus({ preventScroll: true });
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<ClipSession | null>(null);
@@ -581,7 +583,7 @@ function NormalPractice({
     0,
   );
   return (
-    <main className={`playerPage playbackPage normalPractice display-${displayMode}`}>
+    <main ref={practiceRef} className={`playerPage playbackPage normalPractice display-${displayMode}`}>
       <div className="playerShell">
         <header className="playerHeader">
           <div>
@@ -594,7 +596,7 @@ function NormalPractice({
             <button className="playerButton" onClick={onBack}>
               クリップ選択に戻る
             </button>
-            <button type="button" className="helpButton" aria-label="操作案内" title="操作案内" onClick={() => { sendTourEvent({ type: 'reset' }); setShowTutorial(true); }}>?</button>
+            <button type="button" className="helpButton" aria-label="操作案内" title="操作案内" onClick={() => { sendTourEvent({ type: 'reset' }); setShowTutorial(true); focusTyping(); }}>?</button>
           </div>
         </header>
         <section className="videoStage">
@@ -619,6 +621,7 @@ function NormalPractice({
           )}
           {ready && !complete && (
             <OverlayApp
+              autoFocusTyping
               initialSubtitleCues={clip.cues}
               initialSubtitleFileName={practice.fileName}
               displaySubtitleCues={practice.displaySubtitle?.cues}
@@ -637,7 +640,7 @@ function NormalPractice({
             />
           )}
           {showTutorial && ready && !complete && (
-            <PracticeTutorial step={!didType && (snapshot.status === 'ready' || snapshot.status === 'blocked') ? 'play' : tour.stage} reasonNeedsMeaning={reasonNeedsMeaning} onSkip={closeTutorial} onNext={() => sendTourEvent({ type: 'confirm-dictionary' })} />
+            <PracticeTutorial step={!didType && (snapshot.status === 'ready' || snapshot.status === 'blocked') ? 'play' : tour.stage} reasonNeedsMeaning={reasonNeedsMeaning} onSkip={closeTutorial} onNext={() => { sendTourEvent({ type: 'confirm-dictionary' }); focusTyping(); }} />
           )}
           {snapshot.status === 'loading' && (
             <p className="normalStatus" role="status">

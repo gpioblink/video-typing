@@ -6,6 +6,7 @@ import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import { findDisplaySubtitleCue } from '../lib/displaySubtitles';
 import type { PracticeTutorialEvent } from '../lib/practiceTutorial';
+import { createTypingFocusRef } from '../lib/typingFocus';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
@@ -61,6 +62,7 @@ interface Props {
   }>>;
   panelStorageScope?: string;
   layoutRevision?: number;
+  autoFocusTyping?: boolean;
   onTypingProgressChange?: (progress: StoredTypingProgressData) => void;
   onTutorialEvent?: (event: PracticeTutorialEvent) => void;
   onReasonMeaningSelectionChange?: (active: boolean) => void;
@@ -107,6 +109,7 @@ function OverlaySession({
   panelDefaults,
   panelStorageScope,
   layoutRevision,
+  autoFocusTyping = false,
   onTypingProgressChange,
   onTutorialEvent,
   onReasonMeaningSelectionChange,
@@ -189,6 +192,7 @@ function OverlaySession({
     unknownHintSelectionHandlerRef.current = handler;
   }, []);
   const praiseTimerRef = useRef<number | null>(null);
+  const typingKeyboardRef = useMemo(() => createTypingFocusRef(autoFocusTyping), [autoFocusTyping]);
 
   const cache = useMemo(() => {
     return createCache({
@@ -1099,6 +1103,7 @@ function OverlaySession({
         >
           <Window
             key={`${activeFrame.id}:${activeFrameResetRevision}`}
+            onKeyboardElementChange={typingKeyboardRef}
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
             resetRevision={activeFrameResetRevision}

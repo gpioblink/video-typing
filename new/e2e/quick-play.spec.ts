@@ -98,17 +98,18 @@ async function moveToCue(page: Page, cue: SubtitleCue, preserveGuide = false) {
 }
 
 async function typeCue(page: Page, cue: SubtitleCue) {
-  await keyboard(page).focus();
+  await expect(keyboard(page)).toBeFocused();
   const letters = cue.text.replace(/[^A-Za-z]/g, '');
   const finished = await keyboard(page).locator('.finished').count();
-  await keyboard(page).pressSequentially(letters.slice(finished), { delay: 12 });
+  await page.keyboard.type(letters.slice(finished), { delay: 12 });
   await expect(keyboard(page).locator('.finished')).toHaveCount(letters.length);
 }
 
 async function completeClip(page: Page, video: RecommendedVideo) {
   const cues = captions(video);
-  for (const cue of cues) {
+  for (const [index, cue] of cues.entries()) {
     await moveToCue(page, cue);
+    if (index === 0) await keyboard(page).focus();
     await typeCue(page, cue);
   }
   await page.evaluate(time => (window as any).testPlayer.seekTo(time), video.clips[0].end);
@@ -117,6 +118,93 @@ async function completeClip(page: Page, video: RecommendedVideo) {
   await expect(page.locator('.normalResult')).toContainText(`${expected} 文字入力しました。`);
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
 }
+
+test('continuous keyboard input survives cue changes without refocusing the typing surface', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await chooseVideo(page);
+  await expect(keyboard(page)).toBeFocused();
+  await openVideo(page);
+  const cues = captions(FIRST);
+  await moveToCue(page, cues[0]);
+  await page.evaluate(() => (window as any).testPlayer.pauseVideo());
+  // Focus once, then use the actual keyboard. Locator.pressSequentially would
+  // silently focus each replacement element and conceal this regression.
+  await keyboard(page).focus();
+  await page.keyboard.type(cues[0].text.replace(/[^A-Za-z]/g, ''));
+  await expect(keyboard(page).locator('.finished')).toHaveCount(cues[0].text.replace(/[^A-Za-z]/g, '').length);
+  // Let the native playback clock cross into the next caption.
+  await page.evaluate(time => { (window as any).testPlayer.seekTo(time); (window as any).testPlayer.playVideo(); }, cues[0].end - 0.05);
+  await expect(subtitle(page)).toHaveText(cues[1].text);
+  await expect(keyboard(page)).toBeFocused();
+  await page.keyboard.type(cues[1].text.replace(/[^A-Za-z]/g, ''));
+  await expect(keyboard(page).locator('.finished')).toHaveCount(cues[1].text.replace(/[^A-Za-z]/g, '').length);
+});
+
+test('cue replacement respects deliberate focus in settings and the native player', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await chooseVideo(page); await openVideo(page);
+  const cues = captions(FIRST);
+  await moveToCue(page, cues[0]);
+  await page.evaluate(() => (window as any).testPlayer.pauseVideo());
+  await keyboard(page).focus();
+  await panel(page, 'Config').getByRole('button', { name: 'Configを開く' }).click();
+  const cueNumber = page.getByRole('textbox', { name: 'Cue number', exact: true });
+  await cueNumber.fill('2');
+  await page.evaluate(time => (window as any).testPlayer.seekTo(time), cues[1].start + 0.1);
+  await expect(subtitle(page)).toHaveText(cues[1].text);
+  await expect(cueNumber).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('3');
+  await expect(cueNumber).toHaveValue('3');
+  await expect(keyboard(page).locator('.finished')).toHaveCount(0);
+  const nativePlayer = page.locator('iframe[title="YouTube video player"]');
+  await nativePlayer.focus();
+  await page.evaluate(time => (window as any).testPlayer.seekTo(time), cues[2].start + 0.1);
+  await expect(subtitle(page)).toHaveText(cues[2].text);
+  await expect(nativePlayer).toBeFocused();
+});
+
+test('tutorial confirmation returns focus for the next typed character', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/'); await chooseVideo(page); await openVideo(page, true);
+  await page.evaluate(time => (window as any).testPlayer.seekTo(time), captions(FIRST)[0].start + 0.1);
+  await expect(keyboard(page).locator('.available')).toBeVisible();
+  await keyboard(page).focus();
+  await page.keyboard.type('xThis');
+  await expect(page.locator('.normalTutorial')).toContainText('3 / 5');
+  await page.keyboard.press('m');
+  await expect(page.locator('.normalTutorial')).toContainText('4 / 5');
+  await page.getByRole('button', { name: '確認しました', exact: true }).click();
+  await expect(page.locator('.normalTutorial')).toContainText('5 / 5');
+  await expect(keyboard(page)).toBeFocused();
+  await page.keyboard.type('b');
+  await expect(page.locator('.normalTutorial')).toHaveCount(0);
+  await expect(keyboard(page).locator('.finished')).toHaveCount(5);
+});
+
+test('choosing a final-word meaning returns focus before advancing to the next cue', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await page.getByText('好きなYouTube動画で遊ぶ', { exact: true }).click();
+  await page.getByLabel('YouTube URL', { exact: true }).fill(FIRST.sourceUrl);
+  await page.getByLabel('字幕ファイル', { exact: true }).setInputFiles({ name: 'focus.srt', mimeType: 'text/plain',
+    buffer: Buffer.from('1\n00:01:47,000 --> 00:01:49,000\nBlade\n\n2\n00:01:49,000 --> 00:01:51,000\nDark\n') });
+  await page.getByRole('button', { name: '区間を選ぶ', exact: true }).click();
+  await page.getByRole('button', { name: '開く', exact: true }).click();
+  await openVideo(page);
+  await page.evaluate(() => { (window as any).testPlayer.pauseVideo(); (window as any).testPlayer.seekTo(107.1); });
+  await expect(subtitle(page)).toHaveText('Blade');
+  await keyboard(page).focus(); await page.keyboard.type('xBlade');
+  await expect(keyboard(page)).toContainText('誤答理由を選んでください');
+  await page.keyboard.press('u');
+  await panel(page, 'Hint').locator('.selectable').first().click();
+  await expect(keyboard(page)).toBeFocused();
+  await page.evaluate(() => (window as any).testPlayer.seekTo(109.1));
+  await expect(subtitle(page)).toHaveText('Dark');
+  await expect(keyboard(page)).toBeFocused();
+  await page.keyboard.type('Dark');
+  await expect(keyboard(page).locator('.finished')).toHaveCount(4);
+});
 
 test('the five-stage tutorial follows a real mistake, reason and dictionary before three complete attempts', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));

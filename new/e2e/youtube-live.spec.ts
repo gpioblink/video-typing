@@ -23,6 +23,7 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
   expect(Math.abs(await frame.evaluate(() => document.querySelector('video')!.currentTime) - paused)).toBeLessThan(0.2);
   await frame.evaluate(() => (document.getElementById('movie_player') as any).playVideo());
   await page.getByRole('region', { name: 'Subtitle', exact: true }).getByRole('button', { name: '英語（答え）', exact: true }).click();
+  const keyboard = typing.locator('[tabindex="0"]'); await keyboard.focus();
   await expect.poll(state).toBe(1);
   const text = readFileSync(resolve('public', video.subtitle.url), 'utf8');
   const seconds = (time: string) => { const [h, m, s] = time.trim().replace(',', '.').split(':').map(Number); return h * 3600 + m * 60 + s; };
@@ -34,9 +35,9 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
     const cueText = lines.slice(i + 1).join('\n');
     await frame.evaluate(time => (document.getElementById('movie_player') as any).seekTo(time, true), Math.max(start, range.start) + 0.1);
     await expect(subtitle).toHaveText(cueText, { timeout: 10_000 });
-    const keyboard = typing.locator('[tabindex="0"]'); await keyboard.focus();
+    await expect(keyboard).toBeFocused();
     const letters = cueText.replace(/\[[^\]]*\]|\([^)]*\)/g, '').replace(/[^A-Za-z]/g, '');
-    await keyboard.pressSequentially(letters, { delay: 15 });
+    await page.keyboard.type(letters, { delay: 15 });
     await expect(keyboard.locator('.finished')).toHaveCount(letters.length);
     if (cueIndex++ === 0) {
       await frame.evaluate(time => (document.getElementById('movie_player') as any).seekTo(time, true), Math.max(start, range.start));

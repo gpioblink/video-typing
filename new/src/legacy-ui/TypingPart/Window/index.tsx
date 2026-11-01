@@ -22,6 +22,7 @@ interface Props {
   frame: CaptionFrame;
   initialFinishedCharIds: ID[];
   resetRevision?: number;
+  onKeyboardElementChange?: (element: HTMLDivElement | null) => void;
   sendCompleted: () => void;
   requestExplanation: (query: string, options?: ExplanationRequestOptions) => Promise<void>;
   onMistakeInput?: () => void;
@@ -292,6 +293,7 @@ export function Window({
   frame,
   initialFinishedCharIds,
   resetRevision = 0,
+  onKeyboardElementChange,
   sendCompleted,
   requestExplanation,
   onMistakeInput,
@@ -312,7 +314,11 @@ export function Window({
   const [pendingMistake, setPendingMistake] = useState<PendingMistake | null>(null);
   const gameRef = useRef(game);
   const keyboardLogRef = useRef(keyboardLog);
-  const keyboardRef = useRef<HTMLDivElement>(null);
+  const keyboardRef = useRef<HTMLDivElement | null>(null);
+  const setKeyboardRef = useCallback((element: HTMLDivElement | null) => {
+    keyboardRef.current = element;
+    onKeyboardElementChange?.(element);
+  }, [onKeyboardElementChange]);
   const pendingMistakeExplanationPromiseRef = useRef<Promise<void> | null>(null);
   const hintedWordKeysRef = useRef<Set<string>>(new Set());
   const [columnsPerLine, setColumnsPerLine] = useState(DEFAULT_COLUMNS_PER_LINE);
@@ -423,15 +429,13 @@ export function Window({
     onUnknownHintSelectionHandlerChange?.(null);
     onMistakeReasonPromptClose?.();
 
+    keyboardRef.current?.focus({ preventScroll: true });
+
     if (pendingMistake.shouldCompleteAfterSelection) {
       await explanationPromise;
       sendCompleted();
       return;
     }
-
-    window.setTimeout(() => {
-      keyboardRef.current?.focus();
-    }, 0);
   }, [
     frame,
     onMistakeReasonPromptClose,
@@ -520,15 +524,13 @@ export function Window({
     setPendingMistake(null);
     onMistakeReasonPromptClose?.();
 
+    keyboardRef.current?.focus({ preventScroll: true });
+
     if (pendingMistake.shouldCompleteAfterSelection) {
       await explanationPromise;
       sendCompleted();
       return;
     }
-
-    window.setTimeout(() => {
-      keyboardRef.current?.focus();
-    }, 0);
   };
 
   const cancelUnknownHintSelectionAsUnaudible = useCallback(() => {
@@ -563,9 +565,7 @@ export function Window({
     onUnknownHintSelectionHandlerChange?.(null);
     onMistakeReasonPromptClose?.();
 
-    window.setTimeout(() => {
-      keyboardRef.current?.focus();
-    }, 0);
+    keyboardRef.current?.focus({ preventScroll: true });
   }, [
     onMistakeReasonPromptClose,
     onUnknownHintSelectionActiveChange,
@@ -699,7 +699,8 @@ export function Window({
   return (
     <Style
       tabIndex={0}
-      ref={keyboardRef}
+      ref={setKeyboardRef}
+      data-typing-keyboard
       onClick={() => keyboardRef.current?.focus()}
       onBlur={restoreFocusIfNetflixTakesIt}
       onKeyUp={stopKeyboardEventPropagation}
