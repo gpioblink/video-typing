@@ -12,7 +12,7 @@ test('phones receive keyboard and small-screen guidance regardless of orientatio
 test('iPadOS desktop identity and Android tablets receive keyboard guidance only', () => {
   assert.equal(getDemoDeviceKind({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', platform: 'MacIntel', maxTouchPoints: 5 }), 'tablet');
   assert.equal(getDemoDeviceKind({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Tablet) Chrome/130 Safari/537.36', maxTouchPoints: 5, mobileHint: false }), 'tablet');
-  assert.equal(getDemoDeviceKind({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)', maxTouchPoints: 5 }), 'tablet');
+  assert.equal(getDemoDeviceKind({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)', maxTouchPoints: 5, mobileHint: true }), 'tablet');
 });
 test('touch-only visitors are covered without classifying a narrow desktop window as a phone', () => {
   assert.equal(getDemoDeviceKind({ userAgent: 'desktop UA', maxTouchPoints: 5, coarsePointer: true, screenWidth: 1024, screenHeight: 1366 }), 'tablet');
