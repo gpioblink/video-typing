@@ -183,13 +183,27 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
   return (
     <main className="playerPage">
       <div className="playerShell">
-        <header className="playerHeader">
+        <header className="playerHeader demoHeader">
           <h1>Video Typing</h1>
-          <span>おすすめを選んですぐに学習</span>
+          <a className="repositoryLink" href="https://github.com/gpioblink/video-typing" target="_blank" rel="noreferrer" aria-label="GitHubリポジトリを開く" title="GitHub">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true" focusable="false">
+              <path d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.73.083-.73 1.205.084 1.838 1.237 1.838 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.76-1.605-2.665-.305-5.467-1.334-5.467-5.93 0-1.31.467-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23a11.51 11.51 0 0 1 3.003-.404c1.02.005 2.045.138 3.003.404 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.922.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+            </svg>
+          </a>
         </header>
         <section className="playerPanel extensionNotice" aria-label="Chrome拡張機能版について">
-          <h2>Chrome拡張機能版のデモページです</h2>
-          <p>このページでは動画タイピングの一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
+          <h2>好きな動画を、語学学習向けのタイピングゲームに</h2>
+          <div className="learningFeatures">
+            <section>
+              <h3>無理なく進める学習サポート</h3>
+              <p>誤答状況に合わせて自動でスロー再生し、対応する動画では日本語版の音声に切り替えて聞き直せます。間違えた単語や熟語は、入力後に自動で辞書が引かれ、脇のウィンドウで意味を確認できます。</p>
+            </section>
+            <section>
+              <h3>タイピングの後も、必要なところから復習</h3>
+              <p>「聞き取れなかった」「知らなかった」などの誤答理由を記録するので、あとから目的に合わせて必要な部分だけ再挑戦できます。復習用の単語帳は、Ankiなどに読み込める形式でエクスポートできます。</p>
+            </section>
+          </div>
+          <p><strong>こちらはChrome拡張機能版のデモページです。</strong> このページでは機能の一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
           <ul>
             <li>YouTubeのほか、Netflix・Prime Videoなど、さまざまな動画サイトに対応</li>
             <li>Bilibiliなどの動画を使った中国語タイピングにも対応</li>

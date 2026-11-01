@@ -31,6 +31,14 @@
   .displayMode label { padding: 8px; }
 }
 .extensionNotice { font-size: 13px; line-height: 1.65; }
+.demoHeader { flex-direction: row; align-items: center; }
+.repositoryLink { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; color: #edf2ef; }
+.repositoryLink:hover { background: #24353d; }
+.repositoryLink:focus-visible { outline: 2px solid #d8efe5; outline-offset: 3px; }
+.repositoryLink svg { display: block; }
+.learningFeatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 14px 0 18px; }
+.learningFeatures h3 { margin: 0 0 6px; font-size: 14px; color: #d8efe5; }
+.learningFeatures p { margin: 0; }
 .extensionNotice p { margin: 6px 0 10px; }
 .extensionNotice ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 28px; padding-left: 20px; margin: 8px 0 12px; }
-@media(max-width:700px) { .extensionNotice ul { grid-template-columns: 1fr; } }
+@media(max-width:700px) { .extensionNotice ul, .learningFeatures { grid-template-columns: 1fr; } }
