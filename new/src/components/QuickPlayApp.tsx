@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { OverlayApp } from './OverlayApp';
+import { PracticeTutorial } from './PracticeTutorial';
 import { RECOMMENDED_VIDEOS, type RecommendedVideo } from '../data/recommendedVideos';
 import { parseYouTubeId, type PracticeClip } from '../lib/clips';
 import { selectClipCues } from '../lib/clipSelection';
@@ -8,6 +9,8 @@ import { createYouTubeAdapter } from '../lib/youtubePlayer';
 import { registerPlaybackTarget } from '../lib/video';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { importDictionaryTsv } from '../lib/dictionary';
+import { ensureDefaultDictionary } from '../lib/defaultDictionary';
+import { calculatePracticeLayout } from '../lib/practiceLayout';
 import type { StoredTypingProgressData, SubtitleCue } from '../types';
 import '../styles/player.css';
 import '../styles/quick-play.css';
@@ -50,6 +53,8 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
   const [customCues, setCustomCues] = useState<SubtitleCue[]>([]);
   const [customFileName, setCustomFileName] = useState('');
   const [withTutorial, setWithTutorial] = useState(() => !learned());
+  const [displayMode, setDisplayMode] = useState<'mini' | 'fullscreen'>('mini');
+  const [dictionaryStatus, setDictionaryStatus] = useState('EJDictを準備しています…');
   const generation = useRef(0);
   const request = useRef<AbortController | null>(null);
   const run = useRef(0);
@@ -60,8 +65,32 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
     },
     [],
   );
+  const prepareDictionary = useCallback(async () => {
+    try {
+      const result = await ensureDefaultDictionary();
+      setDictionaryStatus(result.status === 'imported'
+        ? `EJDictを読み込みました（${result.count.toLocaleString()}件）。`
+        : `辞書を利用できます（${result.count.toLocaleString()}件）。`);
+    } catch {
+      setDictionaryStatus('辞書を読み込めませんでした。');
+    }
+  }, []);
+  useEffect(() => { void prepareDictionary(); }, [prepareDictionary]);
+  useEffect(() => {
+    const changed = () => setDisplayMode(document.fullscreenElement ? 'fullscreen' : 'mini');
+    document.addEventListener('fullscreenchange', changed);
+    return () => document.removeEventListener('fullscreenchange', changed);
+  }, []);
+  const applyDisplayMode = (mode: 'mini' | 'fullscreen') => {
+    setDisplayMode(mode);
+    if (mode === 'fullscreen' && !document.fullscreenElement)
+      void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    else if (mode === 'mini' && document.fullscreenElement)
+      void document.exitFullscreen().catch(() => undefined);
+  };
 
   const selectVideo = async (video: RecommendedVideo) => {
+    applyDisplayMode(displayMode);
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -83,16 +112,17 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         end: cue.end + video.subtitle.offsetSeconds,
       }));
       if (!cues.length) throw new Error('使用できる字幕がありません。');
+      await ensureDefaultDictionary().catch(() => undefined);
       if (current !== generation.current) return;
-      setSelection({
+      const selected: Selection = {
         id: video.id,
         title: video.title,
         source: { kind: 'youtube', videoId: video.videoId },
         cues,
         fileName: video.subtitle.url.split('/').pop()!,
         video,
-      });
-      setStatus('');
+      };
+      open(selected, range.start, range.end);
     } catch (error) {
       if (current === generation.current && !controller.signal.aborted)
         setStatus((error as Error).message);
@@ -100,25 +130,25 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       if (current === generation.current) setBusy(false);
     }
   };
-  const open = () => {
-    if (!selection) return;
+  const open = (selected = selection, from = start, to = end) => {
+    if (!selected) return;
     try {
-      const cues = selectClipCues(selection.cues, start, end);
+      const cues = selectClipCues(selected.cues, from, to);
       const clip: PracticeClip = {
-        id: selection.id,
-        title: selection.title,
-        description: selection.title,
-        source: selection.source,
+        id: selected.id,
+        title: selected.title,
+        description: selected.title,
+        source: selected.source,
         language: 'en',
-        start,
-        end,
+        start: from,
+        end: to,
         cues,
         sync: { offsetSeconds: 0, showText: false },
       };
       setActive({
         clip,
-        fileName: selection.fileName,
-        video: selection.video,
+        fileName: selected.fileName,
+        video: selected.video,
         tutorial: withTutorial,
         run: ++run.current,
       });
@@ -139,6 +169,8 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       <NormalPractice
         key={active.run}
         practice={active}
+        displayMode={displayMode}
+        onDisplayModeChange={applyDisplayMode}
         onBack={() => {
           setActive(null);
           if (learned()) setWithTutorial(false);
@@ -153,8 +185,27 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       <div className="playerShell">
         <header className="playerHeader">
           <h1>Video Typing</h1>
-          <span>動画と練習する区間を選んで「開く」</span>
+          <span>おすすめを選んですぐに学習</span>
         </header>
+        <section className="playerPanel extensionNotice" aria-label="Chrome拡張機能版について">
+          <h2>Chrome拡張機能版のデモページです</h2>
+          <p>このページでは動画タイピングの一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
+          <ul>
+            <li>YouTubeのほか、Netflix・Prime Videoなど、さまざまな動画サイトに対応</li>
+            <li>Bilibiliなどの動画を使った中国語タイピングにも対応</li>
+            <li>動画・字幕・音声のローカルファイルを読み込み、オフラインでも学習可能</li>
+            <li>対応する動画では、誤答時に日本語音声へ切り替えて聞き直し可能</li>
+          </ul>
+          <a href="https://github.com/gpioblink/video-typing#readme" target="_blank" rel="noreferrer">拡張機能版の詳細・導入方法</a>
+        </section>
+        <section className="playerPanel practicePreferences" aria-label="開始前の設定">
+          <fieldset className="displayMode">
+            <legend>動画の表示</legend>
+            <label><input type="radio" name="display-mode" value="mini" checked={displayMode === 'mini'} onChange={() => setDisplayMode('mini')} />ミニ画面</label>
+            <label><input type="radio" name="display-mode" value="fullscreen" checked={displayMode === 'fullscreen'} onChange={() => setDisplayMode('fullscreen')} />全画面</label>
+          </fieldset>
+          <label><input type="checkbox" checked={withTutorial} onChange={event => setWithTutorial(event.target.checked)} /> 操作チュートリアル</label>
+        </section>
         <section className="playerPanel">
           <h2>おすすめクリップ</h2>
           <div className="clipCatalog">
@@ -172,55 +223,16 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
                     {video.creator} · {video.language.toUpperCase()} · {video.subtitle.license}
                   </small>
                   <small>{video.description}</small>
+                  <small>{video.clips[0].end - video.clips[0].start}秒 · 選んで開始</small>
                 </span>
               </button>
             ))}
           </div>
-          {selection?.video && (
-            <p className="clipAttribution">
-              <a href={selection.video.sourceUrl} target="_blank" rel="noreferrer">
-                {selection.video.title}
-              </a>{' '}
-              — {selection.video.attribution} /{' '}
-              <a href={selection.video.subtitle.licenseUrl} target="_blank" rel="noreferrer">
-                {selection.video.subtitle.license}
-              </a>{' '}
-              ·{' '}
-              <a href="./captions/LICENSE.txt" target="_blank" rel="noreferrer">
-                クレジット・変更内容
-              </a>{' '}
-              ·{' '}
-              <a href={selection.video.subtitle.sourceUrl} target="_blank" rel="noreferrer">
-                字幕の出典
-              </a>
-            </p>
-          )}
+          <p className="clipAttribution"><a href="./captions/LICENSE.txt" target="_blank" rel="noreferrer">作品・字幕の出典とクレジット</a></p>
         </section>
         {selection && (
           <section className="playerPanel clipEditor">
             <h2>クリップ選択 — {selection.title}</h2>
-            {selection.video && (
-              <label>
-                おすすめの区間
-                <select
-                  aria-label="おすすめの区間"
-                  onChange={(event) => {
-                    const clip = selection.video!.clips.find(
-                      (item) => item.id === event.target.value,
-                    )!;
-                    setStart(clip.start);
-                    setEnd(clip.end);
-                  }}
-                  defaultValue={selection.video.clips[0].id}
-                >
-                  {selection.video.clips.map((clip) => (
-                    <option key={clip.id} value={clip.id}>
-                      {clip.title}（{time(clip.start)}–{time(clip.end)}）
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <div className="clipRange">
               <label>
                 開始秒
@@ -287,19 +299,11 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
               ))}
             </ol>
             <div className="playerActions">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={withTutorial}
-                  onChange={(event) => setWithTutorial(event.target.checked)}
-                />{' '}
-                操作チュートリアル
-              </label>
               <button
                 type="button"
                 className="playerButton primary"
                 disabled={busy || !selectedCues.length}
-                onClick={open}
+                onClick={() => { applyDisplayMode(displayMode); open(); }}
               >
                 開く
               </button>
@@ -311,6 +315,13 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
           <details className="playerPanel">
             <summary>自分のYouTube動画・字幕を使う</summary>
             <p>映像はYouTubeで再生します。ご自身で利用できる字幕ファイルを読み込んでください。</p>
+            <details className="subtitleHelp">
+              <summary>YouTubeの字幕を取得するには</summary>
+              <p><a href="https://github.com/yt-dlp/yt-dlp#installation" target="_blank" rel="noreferrer">yt-dlp</a>を導入したPCのターミナルで、動画URLを置き換えて実行します。動画を保存せず、英語字幕を取得します。</p>
+              <pre><code>{'yt-dlp --skip-download --no-playlist --write-subs --sub-langs "en.*" --sub-format vtt "動画URL"'}</code></pre>
+              <p>手動字幕がない場合は、上の <code>--write-subs</code> を <code>--write-auto-subs</code> に変えると自動字幕を取得できます。</p>
+              <p>保存された <code>.vtt</code> を「字幕ファイル」で選んでください。別の言語は <code>--sub-langs</code> で指定できます。自動字幕には認識誤りが含まれる場合があります。</p>
+            </details>
             <label>
               YouTube URL
               <input
@@ -371,7 +382,10 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         )}
         <details className="playerPanel">
           <summary>辞書設定</summary>
-          <p>通常版と同じTSV辞書をこのブラウザに読み込めます。</p>
+          <p role="status">{dictionaryStatus}</p>
+          {dictionaryStatus === '辞書を読み込めませんでした。' && <button className="playerButton" onClick={() => void prepareDictionary()}>辞書の読み込みを再試行</button>}
+          <p>Webデモは<a href="https://github.com/kujirahand/EJDict" target="_blank" rel="noreferrer">EJDict</a>（CC0）を使えます。Chrome拡張機能版では、好きな辞書をTSV形式で読み込めます。</p>
+          <p>このブラウザに読み込んだ辞書がある場合は、その辞書を優先します。</p>
           <input
             aria-label="辞書TSV"
             type="file"
@@ -401,10 +415,14 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
 
 function NormalPractice({
   practice,
+  displayMode,
+  onDisplayModeChange,
   onBack,
   onRetry,
 }: {
   practice: OpenPractice;
+  displayMode: 'mini' | 'fullscreen';
+  onDisplayModeChange: (mode: 'mini' | 'fullscreen') => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -422,6 +440,16 @@ function NormalPractice({
   const [showTutorial, setShowTutorial] = useState(practice.tutorial);
   const [didType, setDidType] = useState(false);
   const [didReplay, setDidReplay] = useState(false);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  useEffect(() => {
+    const resized = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+      setLayoutRevision(value => value + 1);
+    };
+    window.addEventListener('resize', resized);
+    return () => window.removeEventListener('resize', resized);
+  }, []);
   const targetId = useMemo(() => `video-typing-clip-${Date.now()}-${practice.run}`, [practice.run]);
   const frames = useMemo(() => clip.cues.map(subtitleCueToCaptionFrame), [clip]);
   const range = useMemo(() => ({ start: clip.start, end: clip.end }), [clip]);
@@ -433,21 +461,7 @@ function NormalPractice({
     if (Object.values(progress).some((frame) => frame.finishedCharIds.length > 0)) setDidType(true);
   }, []);
   const replayed = useCallback(() => setDidReplay(true), []);
-  const panelDefaults = useMemo(() => {
-    const width = Math.max(280, Math.min(760, window.innerWidth - 410));
-    const playerHeight = Math.max(200, Math.min(360, window.innerHeight - 430));
-    const top = playerHeight + 94;
-    const height = Math.max(160, Math.min(260, window.innerHeight - top - 190));
-    return {
-      typing: { position: { x: 16, y: top }, size: { width, height } },
-      hint: {
-        position: { x: width + 40, y: top + 44 },
-        size: { width: 350, height: Math.max(160, window.innerHeight - top - 70) },
-      },
-      config: { position: { x: width + 40, y: top }, size: { width: 350, height: 520 } },
-      subtitle: { position: { x: 16, y: top + height + 12 }, size: { width, height: 160 } },
-    };
-  }, []);
+  const layout = useMemo(() => calculatePracticeLayout(viewport.width, viewport.height, displayMode), [viewport, displayMode]);
   useEffect(() => {
     const adapter =
       clip.source.kind === 'media'
@@ -498,7 +512,7 @@ function NormalPractice({
     0,
   );
   return (
-    <main className="playerPage playbackPage normalPractice">
+    <main className={`playerPage playbackPage normalPractice display-${displayMode}`}>
       <div className="playerShell">
         <header className="playerHeader">
           <div>
@@ -511,16 +525,10 @@ function NormalPractice({
             <button className="playerButton" onClick={onBack}>
               クリップ選択に戻る
             </button>
-            <button className="playerButton" onClick={onRetry}>
-              再挑戦
-            </button>
-            <button className="playerButton" onClick={() => setShowTutorial(true)}>
-              操作案内
-            </button>
           </div>
         </header>
         <section className="videoStage">
-          <div className="normalPlayerWindow">
+          <div className="normalPlayerWindow" style={{ left: layout.player.x, top: layout.player.y, width: layout.player.width, height: layout.player.height }}>
             {clip.source.kind === 'media' ? (
               <video ref={videoRef} controls playsInline />
             ) : (
@@ -528,8 +536,8 @@ function NormalPractice({
             )}
           </div>
           {practice.video && (
-            <small className="normalCredit">
-              {practice.video.attribution} ·{' '}
+            <small className="normalCredit" title={practice.video.attribution}>
+              {practice.video.creator} ·{' '}
               <a href={practice.video.subtitle.licenseUrl} target="_blank" rel="noreferrer">
                 {practice.video.subtitle.license}
               </a>{' '}
@@ -548,39 +556,29 @@ function NormalPractice({
               targetId={targetId}
               shadowRoot={document.head}
               playbackRange={range}
-              panelDefaults={panelDefaults}
+              panelDefaults={layout.panels}
+              panelStorageScope={`web-practice-layout-v4:${displayMode}:${viewport.width < 760 ? 'narrow' : 'wide'}`}
+              layoutRevision={layoutRevision}
+              controlsExtra={<>
+                <div className="practiceControlActions">
+                  <button type="button" onClick={() => onDisplayModeChange(displayMode === 'mini' ? 'fullscreen' : 'mini')}>{displayMode === 'mini' ? '全画面にする' : 'ミニ画面にする'}</button>
+                  <button type="button" onClick={() => setLayoutRevision(value => value + 1)}>配置をリセット</button>
+                  <button type="button" onClick={() => setShowTutorial(true)}>操作案内</button>
+                  <button type="button" onClick={onRetry}>再挑戦</button>
+                </div>
+                {snapshot.status === 'blocked' && <p role="status">動画中央の再生ボタンからも開始できます。</p>}
+              </>}
               onTypingProgressChange={receiveProgress}
               onReplay={replayed}
             />
           )}
-          {showTutorial && !complete && (
-            <div className="normalTutorial" role="status">
-              {!didType
-                ? '1 / 3　Typingウィンドウをクリックして英字を入力します。空白・記号は自動です。'
-                : !didReplay
-                  ? '2 / 3　Typingの「聞き直す」を押して、もう一度聞いてみましょう。'
-                  : '3 / 3　最後まで入力しましょう。未完了の問題は通常版と同じように繰り返します。'}{' '}
-              <button
-                type="button"
-                style={{ pointerEvents: 'auto' }}
-                onClick={() => setShowTutorial(false)}
-              >
-                スキップ
-              </button>
-            </div>
+          {showTutorial && ready && !complete && (
+            <PracticeTutorial step={!didType && (snapshot.status === 'ready' || snapshot.status === 'blocked') ? 'play' : !didType ? 'type' : !didReplay ? 'replay' : 'finish'} onSkip={() => setShowTutorial(false)} />
           )}
           {snapshot.status === 'loading' && (
             <p className="normalStatus" role="status">
               動画を読み込んでいます…
             </p>
-          )}
-          {(snapshot.status === 'ready' || snapshot.status === 'blocked') && (
-            <button
-              className="playerButton normalPlay"
-              onClick={() => void sessionRef.current?.play()}
-            >
-              再生する（動画中央の再生ボタンも使えます）
-            </button>
           )}
           {snapshot.status === 'error' && (
             <div className="normalError" role="alert">

@@ -7,7 +7,7 @@ import { RECOMMENDED_VIDEOS } from '../src/data/recommendedVideos';
 for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} normal learning UI`, async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: new RegExp(video.title) }).click();
-  await page.getByRole('button', { name: '開く', exact: true }).click();
+  const controls = page.getByRole('region', { name: 'Controls', exact: true });
   const typing = page.getByRole('region', { name: 'Typing', exact: true });
   const subtitle = page.getByRole('region', { name: 'Subtitle', exact: true }).locator('div').last();
   await expect(typing).toBeVisible({ timeout: 20_000 });
@@ -18,12 +18,12 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
   if (await nativePlay.isVisible()) await nativePlay.click();
   const state = () => frame.evaluate(() => (document.getElementById('movie_player') as any).getPlayerState());
   await expect.poll(state, { timeout: 20_000 }).toBe(1);
-  await typing.getByRole('button', { name: '一時停止', exact: true }).click();
+  await controls.getByRole('button', { name: '一時停止', exact: true }).click();
   await expect.poll(state).toBe(2);
   const paused = await frame.evaluate(() => document.querySelector('video')!.currentTime);
   await page.waitForTimeout(500);
   expect(Math.abs(await frame.evaluate(() => document.querySelector('video')!.currentTime) - paused)).toBeLessThan(0.2);
-  await typing.getByRole('button', { name: '再生する', exact: true }).click();
+  await controls.getByRole('button', { name: '再生する', exact: true }).click();
   await expect.poll(state).toBe(1);
   const text = readFileSync(resolve('public', video.subtitle.url), 'utf8');
   const seconds = (time: string) => { const [h, m, s] = time.trim().replace(',', '.').split(':').map(Number); return h * 3600 + m * 60 + s; };
@@ -40,7 +40,7 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
     await keyboard.pressSequentially(letters, { delay: 15 });
     await expect(keyboard.locator('.finished')).toHaveCount(letters.length);
     if (cueIndex++ === 0) {
-      await typing.getByRole('button', { name: '聞き直す', exact: true }).click();
+      await controls.getByRole('button', { name: '聞き直す', exact: true }).click();
       await expect.poll(state).toBe(1);
     }
   }

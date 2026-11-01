@@ -51,7 +51,15 @@ interface Props {
   }>;
   showDebugPanel?: boolean;
   playbackRange?: { start: number; end: number };
-  panelDefaults?: Partial<Record<PanelKind, { position: PanelPosition; size: PanelSize }>>;
+  panelDefaults?: Partial<Record<PanelKind, {
+    position: PanelPosition;
+    size: PanelSize;
+    minimumSize?: PanelSize;
+    defaultMinimized?: boolean;
+  }>>;
+  panelStorageScope?: string;
+  layoutRevision?: number;
+  controlsExtra?: React.ReactNode;
   onTypingProgressChange?: (progress: StoredTypingProgressData) => void;
   onReplay?: () => void;
   showClipResult?: boolean;
@@ -94,6 +102,9 @@ function OverlaySession({
   showDebugPanel = true,
   playbackRange,
   panelDefaults,
+  panelStorageScope,
+  layoutRevision,
+  controlsExtra,
   onTypingProgressChange,
   onReplay,
   showClipResult = false,
@@ -134,6 +145,7 @@ function OverlaySession({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [subtitlesVisible, setSubtitlesVisible] = useState(true);
   const [clipComplete, setClipComplete] = useState(false);
   const clipCompleteRef = useRef(false);
   const allProgressRef = useRef(typingProgress);
@@ -1057,17 +1069,53 @@ function OverlaySession({
         onKeyPress={stopOverlayKeyboardEventPropagation}
       >
         <DraggablePanel
+          kind="controls"
+          title="Controls"
+          minimizable={Boolean(panelDefaults?.controls?.defaultMinimized)}
+          defaultMinimized={panelDefaults?.controls?.defaultMinimized}
+          defaultPosition={panelDefaults?.controls?.position || { x: 24, y: 72 }}
+          defaultSize={panelDefaults?.controls?.size || { width: 380, height: 140 }}
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.controls?.minimumSize || { width: 240, height: 140 }}
+        >
+          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+            {!isVideoAvailable ? <p role="status">動画を読み込めません。動画を開き直してください。</p> : null}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button type="button" data-action="play" onClick={() => {
+                const video = getVideoElement(targetId);
+                if (!video) return;
+                if (video.paused) void video.play().catch(() => undefined);
+                else video.pause();
+              }}>{isPlaying ? '一時停止' : '再生する'}</button>
+              <button type="button" data-action="replay" disabled={!activeCue} onClick={() => {
+                if (!activeCue) return;
+                seekTo(activeCue.start);
+                const video = getVideoElement(targetId);
+                if (video) void video.play().then(() => {
+                  if (!video.paused) onReplay?.();
+                }).catch(() => undefined);
+              }}>聞き直す</button>
+            </div>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={subtitlesVisible} onChange={event => setSubtitlesVisible(event.target.checked)} />
+              字幕を表示
+            </label>
+            {controlsExtra}
+          </div>
+        </DraggablePanel>
+        <DraggablePanel
           kind="typing"
+          minimizable={Boolean(panelDefaults?.typing?.defaultMinimized)}
+          defaultMinimized={panelDefaults?.typing?.defaultMinimized}
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.typing?.minimumSize}
           title="Typing"
           defaultPosition={panelDefaults?.typing?.position || { x: 24, y: 220 }}
           defaultSize={panelDefaults?.typing?.size || { width: 760, height: 260 }}
           titleBackground={isTypingCueActive ? '#1f7a3a' : '#162229'}
         >
-          {!isVideoAvailable ? <p role="status">動画を読み込めません。動画を開き直してください。</p> : null}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <button type="button" onClick={() => { const video = getVideoElement(targetId); if (!video) return; if (video.paused) void video.play().catch(() => undefined); else video.pause(); }}>{isPlaying ? '一時停止' : '再生する'}</button>
-            <button type="button" disabled={!activeCue} onClick={() => { if (!activeCue) return; seekTo(activeCue.start); const video = getVideoElement(targetId); if (video) void video.play().then(() => { if (!video.paused) onReplay?.(); }).catch(() => undefined); }}>聞き直す</button>
-          </div>
           <Window
             key={`${activeFrame.id}:${activeFrameResetRevision}`}
             frame={activeFrame}
@@ -1092,7 +1140,12 @@ function OverlaySession({
         </DraggablePanel>
         <DraggablePanel
           kind="hint"
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.hint?.minimumSize}
           title="Hint"
+          minimizable={Boolean(panelDefaults)}
+          defaultMinimized={panelDefaults?.hint?.defaultMinimized}
           defaultPosition={panelDefaults?.hint?.position || { x: 700, y: 120 }}
           defaultSize={panelDefaults?.hint?.size || { width: 360, height: 400 }}
         >
@@ -1105,6 +1158,9 @@ function OverlaySession({
         {showDebugPanel ? (
           <DraggablePanel
             kind="config"
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.config?.minimumSize}
             title="Config"
             defaultPosition={panelDefaults?.config?.position || { x: 24, y: 24 }}
             defaultSize={panelDefaults?.config?.size || { width: 380, height: 520 }}
@@ -1130,12 +1186,17 @@ function OverlaySession({
         ) : null}
         <DraggablePanel
           kind="subtitle"
+          minimizable={Boolean(panelDefaults?.subtitle?.defaultMinimized)}
+          defaultMinimized={panelDefaults?.subtitle?.defaultMinimized}
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.subtitle?.minimumSize}
           title="Subtitle"
           defaultPosition={panelDefaults?.subtitle?.position || { x: 180, y: 520 }}
           defaultSize={panelDefaults?.subtitle?.size || { width: 520, height: 180 }}
         >
           <SubtitlePanel
-            cueText={displayCue?.text || ''}
+            cueText={subtitlesVisible ? displayCue?.text || '' : '字幕は非表示です'}
             fileName={nativeSubtitleState.fileName || subtitleFileName}
           />
         </DraggablePanel>

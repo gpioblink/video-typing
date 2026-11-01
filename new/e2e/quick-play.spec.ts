@@ -68,7 +68,7 @@ const subtitle = (page: Page) => panel(page, 'Subtitle').locator('div').last();
 const keyboard = (page: Page) => panel(page, 'Typing').locator('[tabindex="0"]');
 
 async function expectNormalPanels(page: Page) {
-  for (const name of ['Typing', 'Hint', 'Config', 'Subtitle']) await expect(panel(page, name)).toBeVisible();
+  for (const name of ['Typing', 'Hint', 'Config', 'Subtitle', 'Controls']) await expect(panel(page, name)).toBeVisible();
   expect(await page.evaluate(() => typeof chrome === 'undefined' || !chrome.runtime?.id)).toBe(true);
   expect(await page.evaluate(() => typeof chrome === 'undefined' || typeof chrome.storage === 'undefined')).toBe(true);
   await expect(page.locator('iframe[title="YouTube video player"]')).toBeVisible();
@@ -76,15 +76,10 @@ async function expectNormalPanels(page: Page) {
 
 async function chooseVideo(page: Page, video = FIRST) {
   await page.getByRole('button', { name: new RegExp(video.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).click();
-  await expect(page.getByRole('list', { name: '選択区間の字幕' }).locator('li')).not.toHaveCount(0);
-  await expect(page.getByLabel('開始秒', { exact: true })).toHaveValue(String(video.clips[0].start));
-  await expect(page.getByLabel('終了秒', { exact: true })).toHaveValue(String(video.clips[0].end));
-  await expect(page.locator('.clipAttribution')).toContainText(video.subtitle.license);
-  await expect(page.getByRole('link', { name: '字幕の出典' })).toHaveAttribute('href', video.subtitle.sourceUrl);
+  await expect(page.getByRole('heading', { name: /クリップ選択 —/ })).toHaveCount(0);
 }
 
 async function openVideo(page: Page) {
-  await page.getByRole('button', { name: '開く', exact: true }).click();
   await expectNormalPanels(page);
 }
 
@@ -107,7 +102,7 @@ async function completeClip(page: Page, video: RecommendedVideo, tutorial: boole
     await typeCue(page, cue);
     if (tutorial && index === 0) {
       await expect(page.locator('.normalTutorial')).toContainText('2 / 3');
-      await panel(page, 'Typing').getByRole('button', { name: '聞き直す', exact: true }).click();
+      await panel(page, 'Controls').getByRole('button', { name: '聞き直す', exact: true }).click();
       await expect(page.locator('.normalTutorial')).toContainText('3 / 3');
     }
   }
@@ -164,11 +159,15 @@ test('licensed selection opens the normal overlay, completes tutorial and retrie
 test('normal overlay keeps unfinished cues looping, preserves native pause and supports range editing and replay', async ({ page }) => {
   await mockYouTube(page);
   await page.goto('/');
-  await chooseVideo(page);
+  await page.getByText('自分のYouTube動画・字幕を使う', { exact: true }).click();
+  await page.getByLabel('YouTube URL', { exact: true }).fill(FIRST.sourceUrl);
+  await page.getByLabel('字幕ファイル', { exact: true }).setInputFiles(resolve('public', FIRST.subtitle.url));
+  await page.getByRole('button', { name: '区間を選ぶ', exact: true }).click();
   const range = FIRST.clips[0];
   await page.getByLabel('開始秒', { exact: true }).fill(String(range.start + 1));
   await page.getByLabel('終了秒', { exact: true }).fill(String(range.end - 1));
   await expect(page.getByRole('list', { name: '選択区間の字幕' })).toContainText(captions(FIRST)[0].text);
+  await page.getByRole('button', { name: '開く', exact: true }).click();
   await openVideo(page);
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.cue.startSeconds)).toBe(range.start + 1);
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.cue.endSeconds)).toBe(range.end - 1);
@@ -176,14 +175,14 @@ test('normal overlay keeps unfinished cues looping, preserves native pause and s
   const priorSeeks = await page.evaluate(() => (window as any).testPlayer.seeks.length);
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.seeks.length), { timeout: 8_000 }).toBeGreaterThan(priorSeeks);
   await expect(subtitle(page)).toHaveText(captions(FIRST)[0].text);
-  await panel(page, 'Typing').getByRole('button', { name: '一時停止', exact: true }).click();
+  await panel(page, 'Controls').getByRole('button', { name: '一時停止', exact: true }).click();
   const paused = await page.evaluate(() => (window as any).testPlayer.getCurrentTime());
   await page.waitForTimeout(350);
   expect(await page.evaluate(() => (window as any).testPlayer.getCurrentTime())).toBe(paused);
   const another = captions(FIRST)[2];
   await moveToCue(page, another);
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
-  await panel(page, 'Typing').getByRole('button', { name: '聞き直す', exact: true }).click();
+  await panel(page, 'Controls').getByRole('button', { name: '聞き直す', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(false);
   expect(await page.evaluate(() => (window as any).testPlayer.getCurrentTime())).toBeLessThan(another.start + 0.5);
   expect(await page.evaluate(() => (window as any).testPlayer.options.playerVars.controls)).toBe(1);
@@ -198,9 +197,8 @@ test('caption and official API loading failures offer retry without retaining ol
   await page.getByRole('button', { name: new RegExp(FIRST.title) }).click();
   await expect(page.getByRole('alert')).toContainText(/Failed to fetch|字幕を読み込めません/);
   await page.unroute(subtitleUrl);
-  await chooseVideo(page);
   await page.route(API_URL, route => route.abort());
-  await page.getByRole('button', { name: '開く', exact: true }).click();
+  await chooseVideo(page);
   await expect(page.getByRole('alert')).toContainText('YouTube API could not be loaded');
   await page.unroute(API_URL);
   await mockYouTube(page);
@@ -225,10 +223,10 @@ test('the ordinary web overlay uses imported IndexedDB hints, preserves tags acr
   await chooseVideo(page);
   await openVideo(page);
   await moveToCue(page, captions(FIRST)[0]);
-  await panel(page, 'Typing').getByRole('button', { name: '一時停止', exact: true }).click();
+  await panel(page, 'Controls').getByRole('button', { name: '一時停止', exact: true }).click();
   await keyboard(page).locator('.available').click();
-  await expect(panel(page, 'Hint').locator('.selectable')).toContainText('Original test demonstrative.');
-  await panel(page, 'Hint').locator('.selectable').click();
+  await expect(panel(page, 'Hint').locator('.selectable').filter({ hasText: 'Original test demonstrative.' })).toContainText('Original test demonstrative.');
+  await panel(page, 'Hint').locator('.selectable').filter({ hasText: 'Original test demonstrative.' }).click();
   await expect(keyboard(page).getByText('ignorance', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
   await moveToCue(page, captions(FIRST)[2]);
@@ -239,4 +237,89 @@ test('the ordinary web overlay uses imported IndexedDB hints, preserves tags acr
   await expect(keyboard(page).getByText('ignorance', { exact: true })).toHaveCount(0);
   await expect(panel(page, 'Hint').locator('.item')).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
+});
+
+test('demo explains the extension, loads EJDict by default and keeps playback actions in Controls', async ({ page }) => {
+  await mockYouTube(page);
+  await page.goto('/');
+  const notice = page.getByRole('region', { name: 'Chrome拡張機能版について', exact: true });
+  await expect(notice).toContainText('デモページ');
+  for (const feature of ['Netflix', 'Prime Video', 'Bilibili', '中国語', 'オフライン', '日本語音声']) await expect(notice).toContainText(feature);
+  await page.getByText('辞書設定', { exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: /辞書|EJDict/ })).toContainText('46,916', { timeout: 30_000 });
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await chooseVideo(page);
+  await openVideo(page);
+  const controls = panel(page, 'Controls');
+  await expect(panel(page, 'Typing').getByRole('button')).toHaveCount(0);
+  await expect(controls.getByRole('button', { name: '一時停止', exact: true })).toBeVisible();
+  await controls.getByRole('checkbox', { name: '字幕を表示', exact: true }).uncheck();
+  await expect(subtitle(page)).toHaveText('字幕は非表示です');
+  await controls.getByRole('checkbox', { name: '字幕を表示', exact: true }).check();
+  await expect(subtitle(page)).toHaveText(captions(FIRST)[0].text);
+  await controls.getByRole('button', { name: '一時停止', exact: true }).click();
+  await keyboard(page).locator('.available').click();
+  await expect(panel(page, 'Hint').locator('.selectable').first()).toContainText(/[\u3040-\u30ff\u4e00-\u9fff]/);
+});
+
+test('fullscreen can be selected before instant play and toggled back to the mini layout', async ({ page }) => {
+  await mockYouTube(page);
+  await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await page.getByRole('radio', { name: '全画面', exact: true }).check();
+  await chooseVideo(page);
+  await openVideo(page);
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
+  await expect(page.locator('main.normalPractice')).toHaveClass(/display-fullscreen/);
+  await panel(page, 'Controls').getByRole('button', { name: 'ミニ画面にする', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(page.locator('main.normalPractice')).toHaveClass(/display-mini/);
+});
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) test(`initial mini layout is visible without overlaps at ${viewport.width}x${viewport.height} and resets after dragging`, async ({ page }) => {
+  await page.setViewportSize(viewport);
+  await mockYouTube(page);
+  await page.goto('/');
+  // Old versions saved several off-screen defaults. The current layout has its
+  // own namespace and must remain usable in an existing browser profile.
+  await page.evaluate(() => localStorage.setItem('video-typing:web:v1:videoTypingPrototypePanelPositions', JSON.stringify({ '127.0.0.1': { typing: { x: 5000, y: 5000 }, config: { x: 5000, y: 5000 } } })));
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await chooseVideo(page);
+  await openVideo(page);
+  const boxes = await page.locator('[data-panel-kind]').evaluateAll(elements => elements.map(element => {
+    const { x, y, width, height } = element.getBoundingClientRect();
+    return { kind: element.getAttribute('data-panel-kind'), x, y, width, height };
+  }));
+  for (const box of boxes) {
+    expect(box.x, box.kind!).toBeGreaterThanOrEqual(0);
+    expect(box.y, box.kind!).toBeGreaterThanOrEqual(72);
+    expect(box.x + box.width, box.kind!).toBeLessThanOrEqual(viewport.width + 1);
+    expect(box.y + box.height, box.kind!).toBeLessThanOrEqual(viewport.height + 1);
+  }
+  for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) {
+    const intersection = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+    expect(intersection, `${a.kind} and ${b.kind}`).toBe(0);
+  }
+  const original = (await panel(page, 'Typing').boundingBox())!;
+  await page.mouse.move(original.x + 60, original.y + 18);
+  await page.mouse.down(); await page.mouse.move(original.x + 80, original.y + 40); await page.mouse.up();
+  if (await panel(page, 'Controls').getByRole('button', { name: 'Controlsを開く' }).isVisible()) await panel(page, 'Controls').getByRole('button', { name: 'Controlsを開く' }).click();
+  await panel(page, 'Controls').getByRole('button', { name: '配置をリセット', exact: true }).click();
+  await expect.poll(async () => Math.round((await panel(page, 'Typing').boundingBox())!.x)).toBe(Math.round(original.x));
+  await expect.poll(async () => Math.round((await panel(page, 'Typing').boundingBox())!.y)).toBe(Math.round(original.y));
+});
+
+test('resizing an active practice reflows every panel without restoring stale geometry', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockYouTube(page); await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
+  await chooseVideo(page); await openVideo(page);
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(() => page.locator('[data-panel-kind]').evaluateAll(elements => {
+      const boxes = elements.map(element => element.getBoundingClientRect());
+      return boxes.every(box => box.left >= 0 && box.top >= 72 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1)
+        && boxes.every((a, i) => boxes.slice(i + 1).every(b => Math.min(a.right, b.right) <= Math.max(a.left, b.left) + 1 || Math.min(a.bottom, b.bottom) <= Math.max(a.top, b.top) + 1));
+    })).toBe(true);
+  }
 });

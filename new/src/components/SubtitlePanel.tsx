@@ -9,7 +9,7 @@ export function SubtitlePanel({ cueText, fileName }: Props) {
   return (
     <div
       style={{
-        width: 520,
+        width: '100%',
         minHeight: 72,
         fontFamily: 'system-ui, sans-serif',
       }}
