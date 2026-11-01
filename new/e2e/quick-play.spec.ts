@@ -126,6 +126,10 @@ test('licensed selection opens the normal overlay, completes tutorial and retrie
   await chooseVideo(page);
   await openVideo(page);
   await expect(page.locator('.normalTutorial')).toContainText('1 / 3');
+  await page.getByRole('button', { name: 'スキップ', exact: true }).click();
+  await expect(page.locator('.normalTutorial')).toHaveCount(0);
+  await page.getByRole('button', { name: '操作案内', exact: true }).click();
+  await expect(page.locator('.normalTutorial')).toContainText('1 / 3');
   const config = panel(page, 'Config');
   await expect(config.getByRole('button', { name: 'Configを開く' })).toHaveAttribute('aria-expanded', 'false');
   await config.getByRole('button', { name: 'Configを開く' }).click();
