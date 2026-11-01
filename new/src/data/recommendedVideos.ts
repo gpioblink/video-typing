@@ -31,7 +31,7 @@ export const RECOMMENDED_VIDEOS: RecommendedVideo[] = [
     title: 'Sintel - Open Movie by Blender Foundation',
     creator: 'Blender Foundation',
     attribution: '(c) copyright Blender Foundation | durian.blender.org',
-    description: '旅人と門番の会話。短い英語を聞いて入力する49秒。',
+    description: '旅人と門番の短い会話を聞いて入力します。',
     language: 'en',
     sourceUrl: 'https://www.youtube.com/watch?v=eRsGyueVLvQ',
     subtitle: {
@@ -59,7 +59,7 @@ export const RECOMMENDED_VIDEOS: RecommendedVideo[] = [
     title: 'Tears of Steel - Blender VFX Open Movie',
     creator: 'Blender Foundation',
     attribution: '(CC) Blender Foundation | mango.blender.org',
-    description: '仲間を励ます短い会話。ゆっくり挑戦する31秒。',
+    description: '仲間を励ます短い会話を聞いて入力します。',
     language: 'en',
     sourceUrl: 'https://www.youtube.com/watch?v=R6MlUcmOul8',
     subtitle: {

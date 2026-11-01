@@ -225,14 +225,6 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
           </div>
 
         </section>
-        <section className="playerPanel practicePreferences" aria-label="開始前の設定">
-          <fieldset className="displayMode">
-            <legend>動画の表示</legend>
-            <label><input type="radio" name="display-mode" value="mini" checked={displayMode === 'mini'} onChange={() => setDisplayMode('mini')} />ミニ画面</label>
-            <label><input type="radio" name="display-mode" value="fullscreen" checked={displayMode === 'fullscreen'} onChange={() => setDisplayMode('fullscreen')} />全画面</label>
-          </fieldset>
-          <label><input type="checkbox" checked={withTutorial} onChange={event => setWithTutorial(event.target.checked)} /> 操作チュートリアル</label>
-        </section>
         <section className="playerPanel">
           <h2>おすすめクリップ</h2>
           <div className="clipCatalog">
@@ -250,13 +242,82 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
                     {video.creator} · {video.language.toUpperCase()} · {video.subtitle.license}
                   </small>
                   <small>{video.description}</small>
-                  <small>{video.clips[0].end - video.clips[0].start}秒 · 選んで開始</small>
+                  <small>{video.clips[0].end - video.clips[0].start}秒</small>
                 </span>
               </button>
             ))}
           </div>
           <p className="clipAttribution"><a href="./captions/LICENSE.txt" target="_blank" rel="noreferrer">作品・字幕の出典とクレジット</a></p>
         </section>
+        {youtubeEnabled && (
+          <details className="playerPanel">
+            <summary>好きなYouTube動画で遊ぶ</summary>
+            <p>映像はYouTubeで再生します。ご自身で利用できる字幕ファイルを読み込んでください。</p>
+            <details className="subtitleHelp">
+              <summary>YouTubeの字幕を取得するには</summary>
+              <p><a href="https://github.com/yt-dlp/yt-dlp#installation" target="_blank" rel="noreferrer">yt-dlp</a>を導入したPCのターミナルで、動画URLを置き換えて実行します。動画を保存せず、英語字幕を取得します。</p>
+              <pre><code>{'yt-dlp --skip-download --no-playlist --write-subs --sub-langs "en.*" --sub-format vtt "動画URL"'}</code></pre>
+              <p>手動字幕がない場合は、上の <code>--write-subs</code> を <code>--write-auto-subs</code> に変えると自動字幕を取得できます。</p>
+              <p>保存された <code>.vtt</code> を「字幕ファイル」で選んでください。別の言語は <code>--sub-langs</code> で指定できます。自動字幕には認識誤りが含まれる場合があります。</p>
+            </details>
+            <label>
+              YouTube URL
+              <input
+                aria-label="YouTube URL"
+                value={url}
+                maxLength={2048}
+                onChange={(event) => setUrl(event.target.value)}
+              />
+            </label>
+            <label>
+              字幕ファイル
+              <input
+                aria-label="字幕ファイル"
+                type="file"
+                accept=".srt,.vtt,.ttml,.xml,.txt"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const cues = parseSubtitleFile(file.name, await file.text());
+                    if (!cues.length) throw new Error('字幕がありません。');
+                    setCustomCues(cues);
+                    setCustomFileName(file.name);
+                    setStatus('');
+                  } catch (error) {
+                    setStatus((error as Error).message);
+                  }
+                }}
+              />
+            </label>
+            <button
+              className="playerButton"
+              disabled={!customCues.length}
+              onClick={() => {
+                try {
+                  request.current?.abort();
+                  generation.current += 1;
+                  setBusy(false);
+                  const id = parseYouTubeId(url);
+                  setSelection({
+                    id: `custom-${id}`,
+                    title: 'YouTube',
+                    source: { kind: 'youtube', videoId: id },
+                    cues: customCues,
+                    fileName: customFileName,
+                  });
+                  setStart(customCues[0].start);
+                  setEnd(Math.min(customCues[customCues.length - 1].end, customCues[0].start + 45));
+                  setStatus('');
+                } catch (error) {
+                  setStatus((error as Error).message);
+                }
+              }}
+            >
+              区間を選ぶ
+            </button>
+          </details>
+        )}
         {selection && (
           <section className="playerPanel clipEditor">
             <h2>クリップ選択 — {selection.title}</h2>
@@ -338,75 +399,6 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
           </section>
         )}
         {status && <p role={busy ? 'status' : 'alert'}>{status}</p>}
-        {youtubeEnabled && (
-          <details className="playerPanel">
-            <summary>自分のYouTube動画・字幕を使う</summary>
-            <p>映像はYouTubeで再生します。ご自身で利用できる字幕ファイルを読み込んでください。</p>
-            <details className="subtitleHelp">
-              <summary>YouTubeの字幕を取得するには</summary>
-              <p><a href="https://github.com/yt-dlp/yt-dlp#installation" target="_blank" rel="noreferrer">yt-dlp</a>を導入したPCのターミナルで、動画URLを置き換えて実行します。動画を保存せず、英語字幕を取得します。</p>
-              <pre><code>{'yt-dlp --skip-download --no-playlist --write-subs --sub-langs "en.*" --sub-format vtt "動画URL"'}</code></pre>
-              <p>手動字幕がない場合は、上の <code>--write-subs</code> を <code>--write-auto-subs</code> に変えると自動字幕を取得できます。</p>
-              <p>保存された <code>.vtt</code> を「字幕ファイル」で選んでください。別の言語は <code>--sub-langs</code> で指定できます。自動字幕には認識誤りが含まれる場合があります。</p>
-            </details>
-            <label>
-              YouTube URL
-              <input
-                aria-label="YouTube URL"
-                value={url}
-                maxLength={2048}
-                onChange={(event) => setUrl(event.target.value)}
-              />
-            </label>
-            <label>
-              字幕ファイル
-              <input
-                aria-label="字幕ファイル"
-                type="file"
-                accept=".srt,.vtt,.ttml,.xml,.txt"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const cues = parseSubtitleFile(file.name, await file.text());
-                    if (!cues.length) throw new Error('字幕がありません。');
-                    setCustomCues(cues);
-                    setCustomFileName(file.name);
-                    setStatus('');
-                  } catch (error) {
-                    setStatus((error as Error).message);
-                  }
-                }}
-              />
-            </label>
-            <button
-              className="playerButton"
-              disabled={!customCues.length}
-              onClick={() => {
-                try {
-                  request.current?.abort();
-                  generation.current += 1;
-                  setBusy(false);
-                  const id = parseYouTubeId(url);
-                  setSelection({
-                    id: `custom-${id}`,
-                    title: 'YouTube',
-                    source: { kind: 'youtube', videoId: id },
-                    cues: customCues,
-                    fileName: customFileName,
-                  });
-                  setStart(customCues[0].start);
-                  setEnd(Math.min(customCues[customCues.length - 1].end, customCues[0].start + 45));
-                  setStatus('');
-                } catch (error) {
-                  setStatus((error as Error).message);
-                }
-              }}
-            >
-              区間を選ぶ
-            </button>
-          </details>
-        )}
         <details className="playerPanel">
           <summary>辞書設定</summary>
           <p role="status">{dictionaryStatus}</p>
@@ -435,6 +427,14 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
             <a href="options.html">字幕・辞書設定</a>
           </p>
         )}
+        <section className="playerPanel practicePreferences" aria-label="開始前の設定">
+          <fieldset className="displayMode">
+            <legend>動画の表示</legend>
+            <label><input type="radio" name="display-mode" value="mini" checked={displayMode === 'mini'} onChange={() => setDisplayMode('mini')} />ミニ画面</label>
+            <label><input type="radio" name="display-mode" value="fullscreen" checked={displayMode === 'fullscreen'} onChange={() => setDisplayMode('fullscreen')} />全画面</label>
+          </fieldset>
+          <label><input type="checkbox" checked={withTutorial} onChange={event => setWithTutorial(event.target.checked)} /> 操作チュートリアル</label>
+        </section>
         <section className="playerPanel extensionNotice" aria-label="Chrome拡張機能版について">
           <p><strong>こちらはChrome拡張機能版のデモページです。</strong> このページでは機能の一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
           <ul>

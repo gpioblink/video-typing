@@ -168,7 +168,7 @@ test('the five-stage tutorial follows a real mistake, reason and dictionary befo
 test('normal overlay keeps unfinished cues looping, preserves native pause and supports range editing and replay', async ({ page }) => {
   await mockYouTube(page);
   await page.goto('/');
-  await page.getByText('自分のYouTube動画・字幕を使う', { exact: true }).click();
+  await page.getByText('好きなYouTube動画で遊ぶ', { exact: true }).click();
   await page.getByLabel('YouTube URL', { exact: true }).fill(FIRST.sourceUrl);
   await page.getByLabel('字幕ファイル', { exact: true }).setInputFiles(resolve('public', FIRST.subtitle.url));
   await page.getByRole('button', { name: '区間を選ぶ', exact: true }).click();
