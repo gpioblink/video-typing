@@ -11,7 +11,7 @@ import {
 } from '../src/lib/dictionary.ts';
 import { createTypedHintContextText } from '../src/lib/hintContext.ts';
 
-const DICTIONARY_TSV_PATH = new URL('../../test/EIJIRO144-10.tsv', import.meta.url);
+const DICTIONARY_TSV_PATH = new URL('./fixtures/dictionary.tsv', import.meta.url);
 
 const WINDOWS = {
   takeCare: 'but you have to take care of yourself',
@@ -467,7 +467,7 @@ async function loadWantedDictionaryEntries(wantedHeadwords) {
       importedAt: 0,
       key: `${normalizedHeadword}\u0000${body}`,
       normalizedHeadword,
-      sourceName: 'EIJIRO144-10.tsv',
+      sourceName: 'dictionary.tsv',
     });
     entriesByHeadword.set(normalizedHeadword, entries);
   }

@@ -17,6 +17,7 @@ import {
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement, seekVideo } from '../lib/video';
+import { observeOverlayTimeline, shouldReplayOverlayLoop, type OverlayTimelineObserver } from '../lib/overlaySync';
 import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
@@ -64,7 +65,17 @@ interface Props {
   shadowRoot: Node;
 }
 
-export function OverlayApp({
+export function OverlayApp(props: Props) {
+  // The local player reuses this component when changing history items. Each
+  // content identity needs fresh cue, hint and typing state and full cleanup.
+  const sessionKey = JSON.stringify([
+    props.targetId, props.playbackStorageKey || props.pageUrl,
+    props.initialSubtitleFileName, Boolean(props.typeReviewMode),
+  ]);
+  return <OverlaySession key={sessionKey} {...props} />;
+}
+
+function OverlaySession({
   initialSubtitleCues,
   initialSubtitleFileName,
   initialTypingProgress,
@@ -108,6 +119,7 @@ export function OverlayApp({
   });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isVideoAvailable, setIsVideoAvailable] = useState(true);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
@@ -125,6 +137,8 @@ export function OverlayApp({
   const mistakeCountsRef = useRef<Record<string, number>>({});
   const activeFrameIdRef = useRef('');
   const nativeReplayCountRef = useRef(0);
+  const nativeReplayGenerationRef = useRef(0);
+  const timelineObserverRef = useRef<OverlayTimelineObserver | null>(null);
   const controlledPlaybackRateRef = useRef<{
     frameId: string;
     loopIndex: number;
@@ -238,10 +252,12 @@ export function OverlayApp({
       return;
     }
 
+    const replayGeneration = nativeReplayGenerationRef.current;
     nativeReplayCountRef.current += 1;
     void replay
       .catch(() => undefined)
       .finally(() => {
+        if (replayGeneration !== nativeReplayGenerationRef.current) return;
         nativeReplayCountRef.current = Math.max(0, nativeReplayCountRef.current - 1);
 
         if (nativeReplayCountRef.current > 0) {
@@ -258,37 +274,13 @@ export function OverlayApp({
       });
   }, [applyMistakeSensitivePlaybackRate, restoreControlledPlaybackRate]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const video = getVideoElement(targetId);
-      if (!video) {
-        setCurrentTime(0);
-        setDuration(0);
-        return;
-      }
-
-      const loopRange = loopRangeRef.current;
-
-      if (loopRange && video.currentTime >= loopRange.end) {
-        const frameId = activeFrameIdRef.current;
-        const mistakeCount = frameId ? mistakeCountsRef.current[frameId] || 0 : 0;
-        if (frameId) {
-          applyMistakeSensitivePlaybackRate(frameId, mistakeCount, { advanceLoop: true });
-        }
-        seekVideo(targetId, loopRange.start);
-        setCurrentTime(loopRange.start);
-        setDuration(video.duration || 0);
-        return;
-      }
-
-      setCurrentTime(video.currentTime || 0);
-      setDuration(video.duration || 0);
-    }, 250);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [applyMistakeSensitivePlaybackRate, targetId]);
+  const seekTo = useCallback((seconds: number) => {
+    if (timelineObserverRef.current) {
+      timelineObserverRef.current.seek(seconds);
+    } else {
+      seekVideo(targetId, seconds);
+    }
+  }, [targetId]);
 
   useEffect(() => {
     return () => {
@@ -315,8 +307,10 @@ export function OverlayApp({
   }, [pageUrl, playbackStorageKey]);
 
   const timelineCue = useMemo(() => {
-    return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
-  }, [currentTime, subtitleCues]);
+    return isVideoAvailable
+      ? subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null
+      : null;
+  }, [currentTime, isVideoAvailable, subtitleCues]);
 
   // Keep showing the cue currently being typed even while playback moves
   // into the padded pre/post-roll area around that cue.
@@ -416,6 +410,68 @@ export function OverlayApp({
     setIsUnknownHintSelectionActive(false);
   }, []);
 
+  useEffect(() => {
+    const video = getVideoElement(targetId);
+    if (!video) return;
+
+    const releaseLoop = () => {
+      // Netflix's native-audio replay deliberately seeks within the current
+      // cue. It owns that operation until its promise settles.
+      if (nativeReplayCountRef.current > 0) return;
+      loopRangeRef.current = null;
+      setLoopCue(null);
+      shouldResumeAfterMistakeReasonRef.current = false;
+      setIsMistakeReasonPromptOpen(false);
+      setActiveFrameResetRevision((revision) => revision + 1);
+      resetHintState();
+      restoreControlledPlaybackRate(video);
+    };
+    const observer = observeOverlayTimeline(video, {
+      seek: (seconds) => seekVideo(targetId, seconds),
+      onExternalSeek: releaseLoop,
+      onUnavailable: () => {
+        setIsVideoAvailable(false);
+        nativeReplayGenerationRef.current += 1;
+        nativeReplayCountRef.current = 0;
+        releaseLoop();
+      },
+      onSample: (snapshot, event) => {
+        if (event === 'loadedmetadata') setIsVideoAvailable(true);
+        const loopRange = loopRangeRef.current;
+        if (loopRange && shouldReplayOverlayLoop(
+          snapshot.currentTime, snapshot.duration, loopRange.end,
+          video.paused, video.seeking, event,
+        )) {
+          const frameId = activeFrameIdRef.current;
+          if (frameId) {
+            applyMistakeSensitivePlaybackRate(
+              frameId, mistakeCountsRef.current[frameId] || 0, { advanceLoop: true },
+            );
+          }
+          // Seek through the observer so this internal loop is not mistaken
+          // for a user's seek to another sentence.
+          timelineObserverRef.current?.seek(loopRange.start);
+          if (event === 'ended') void video.play().catch(() => undefined);
+          return;
+        }
+        currentTimeRef.current = snapshot.currentTime;
+        setCurrentTime(snapshot.currentTime);
+        setDuration(snapshot.duration);
+      },
+    });
+    timelineObserverRef.current = observer;
+    return () => {
+      observer.dispose();
+      timelineObserverRef.current = null;
+    };
+  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId]);
+
+  useEffect(() => () => {
+    nativeReplayGenerationRef.current += 1;
+    nativeReplayCountRef.current = 0;
+    hintFrameGenerationRef.current += 1;
+  }, []);
+
   const isActiveFrameComplete = useMemo(() => {
     const typeableCharCount = activeFrame.caption.filter((char) => char.isTypeable).length;
 
@@ -481,7 +537,7 @@ export function OverlayApp({
   ]);
 
   useEffect(() => {
-    if (!typeReviewMode || loopCue || timelineCue || subtitleCues.length === 0) {
+    if (!isVideoAvailable || !typeReviewMode || loopCue || timelineCue || subtitleCues.length === 0) {
       return;
     }
 
@@ -494,7 +550,7 @@ export function OverlayApp({
     const nextCue = subtitleCues.find((cue) => cue.start > currentTime + 0.05);
 
     if (nextCue) {
-      seekVideo(targetId, nextCue.start);
+      seekTo(nextCue.start);
       setCurrentTime(nextCue.start);
       return;
     }
@@ -511,6 +567,8 @@ export function OverlayApp({
     targetId,
     timelineCue,
     typeReviewMode,
+    isVideoAvailable,
+    seekTo,
   ]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
@@ -710,6 +768,7 @@ export function OverlayApp({
     const nextMistakeCounts = { ...mistakeCountsRef.current };
     delete nextMistakeCounts[activeFrame.id];
     mistakeCountsRef.current = nextMistakeCounts;
+    nativeReplayGenerationRef.current += 1;
     nativeReplayCountRef.current = 0;
     shouldResumeAfterMistakeReasonRef.current = false;
     setIsMistakeReasonPromptOpen(false);
@@ -741,6 +800,7 @@ export function OverlayApp({
       cueText: targetCue.text,
     });
     resetHintState();
+    nativeReplayGenerationRef.current += 1;
     nativeReplayCountRef.current = 0;
     shouldResumeAfterMistakeReasonRef.current = false;
     loopRangeRef.current = null;
@@ -749,13 +809,14 @@ export function OverlayApp({
     setCurrentTime(targetCue.start);
     setActiveFrameResetRevision((revision) => revision + 1);
     restoreControlledPlaybackRate();
-    seekVideo(targetId, targetCue.start);
+    seekTo(targetCue.start);
   }, [
     activeCueIndex,
     resetHintState,
     restoreControlledPlaybackRate,
     subtitleCues,
     targetId,
+    seekTo,
   ]);
 
   const stopOverlayKeyboardEventPropagation = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -970,6 +1031,7 @@ export function OverlayApp({
           defaultSize={{ width: 760, height: 260 }}
           titleBackground={isTypingCueActive ? '#1f7a3a' : '#162229'}
         >
+          {!isVideoAvailable ? <p role="status">動画を読み込めません。動画を開き直してください。</p> : null}
           <Window
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
@@ -1009,10 +1071,6 @@ export function OverlayApp({
             title="Config"
             defaultPosition={{ x: 24, y: 24 }}
             defaultSize={{ width: 380, height: 520 }}
-            minimizable
-            defaultMinimized
-            closable
-            defaultClosed={false}
           >
             <ConfigPanel
               config={config}

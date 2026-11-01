@@ -11,6 +11,7 @@ export function getVideoElement(targetId: string) {
 }
 
 export function seekVideo(targetId: string, nextTime: number) {
+  if (!Number.isFinite(nextTime)) return;
   const nextTimeSeconds = Math.max(0, nextTime);
 
   if (isNetflixHostname(window.location.hostname)) {
