@@ -2,6 +2,24 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { OverlayApp } from './OverlayApp';
 import { PracticeTutorial } from './PracticeTutorial';
 import { createPracticeTutorialState, practiceTutorialReducer } from '../lib/practiceTutorial';
+import { PracticeHistory } from './PracticeHistory';
+import {
+  historyPracticeClip,
+  practiceStorageKey,
+  restartTypingProgress,
+} from '../lib/practiceSession';
+import {
+  loadStoredTypingProgress,
+  loadStoredSubtitle,
+  loadStoredPlaybackPosition,
+  saveStoredSubtitle,
+  saveExternalHistoryMeta,
+  replaceStoredTypingProgress,
+} from '../lib/storage';
+import {
+  createTypeReviewTypingProgress,
+  buildStoredSubtitleTypeReviewFrames,
+} from '../lib/localPlayerReview';
 import { RECOMMENDED_VIDEOS, type RecommendedVideo } from '../data/recommendedVideos';
 import { parseYouTubeId, type PracticeClip } from '../lib/clips';
 import { selectClipCues } from '../lib/clipSelection';
@@ -13,7 +31,12 @@ import { importDictionaryTsv } from '../lib/dictionary';
 import { ensureDefaultDictionary } from '../lib/defaultDictionary';
 import { calculatePracticeLayout } from '../lib/practiceLayout';
 import { getDemoDeviceKind } from '../lib/demoDevice';
-import type { StoredTypingProgressData, SubtitleCue } from '../types';
+import type {
+  ExternalHistoryItem,
+  StoredTypingProgressData,
+  SubtitleCue,
+  TimedCaptionFrame,
+} from '../types';
 import '../styles/player.css';
 import '../styles/quick-play.css';
 
@@ -33,6 +56,13 @@ interface OpenPractice {
   displaySubtitle?: { fileName: string; cues: SubtitleCue[] };
   tutorial: boolean;
   run: number;
+  initialProgress?: StoredTypingProgressData;
+  initialTime?: number;
+  storageKey?: string;
+  typeReviewMode?: boolean;
+  typingFrames?: TimedCaptionFrame[];
+  originalClip?: PracticeClip;
+  originalTypingFrames?: TimedCaptionFrame[];
 }
 const TUTORIAL_KEY = 'video-typing-tutorial-v3';
 function learned() {
@@ -62,6 +92,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
   const [end, setEnd] = useState(45);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [url, setUrl] = useState('');
   const [customCues, setCustomCues] = useState<SubtitleCue[]>([]);
   const [customFileName, setCustomFileName] = useState('');
@@ -153,7 +184,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         displaySubtitle,
         video,
       };
-      open(selected, range.start, range.end);
+      await open(selected, range.start, range.end);
     } catch (error) {
       if (current === generation.current && !controller.signal.aborted)
         setStatus((error as Error).message);
@@ -161,8 +192,10 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       if (current === generation.current) setBusy(false);
     }
   };
-  const open = (selected = selection, from = start, to = end) => {
+  const open = async (selected = selection, from = start, to = end) => {
     if (!selected) return;
+    const opening = ++generation.current;
+    setBusy(true);
     try {
       const cues = selectClipCues(selected.cues, from, to);
       const clip: PracticeClip = {
@@ -176,8 +209,27 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         cues,
         sync: { offsetSeconds: 0, showText: false },
       };
+      const storageKey = practiceStorageKey(clip);
+      await saveStoredSubtitle(storageKey, {
+        fileName: selected.fileName, cues,
+        displaySubtitleFileName: selected.displaySubtitle?.fileName,
+        displaySubtitleCues: selected.displaySubtitle?.cues,
+      });
+      await saveExternalHistoryMeta(storageKey, { title: selected.title, updatedAt: Date.now() });
+      const [storedProgress, position] = await Promise.all([
+        loadStoredTypingProgress(storageKey),
+        loadStoredPlaybackPosition(storageKey),
+      ]);
+      if (opening !== generation.current) return;
+      const initialProgress = selected.video ? restartTypingProgress(storedProgress) : storedProgress;
+      if (selected.video) await replaceStoredTypingProgress(storageKey, initialProgress);
+      if (opening !== generation.current) return;
       setActive({
         clip,
+        initialProgress,
+        typeReviewMode: Boolean(selected.video && Object.values(storedProgress).some(frame => frame.tags.length)),
+        initialTime: selected.video ? from : position?.currentTime,
+        storageKey,
         fileName: selected.fileName,
         displaySubtitle: selected.displaySubtitle,
         video: selected.video,
@@ -186,7 +238,101 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       });
       setStatus('');
     } catch (error) {
-      setStatus((error as Error).message);
+      if (opening === generation.current) setStatus((error as Error).message);
+    } finally {
+      if (opening === generation.current) setBusy(false);
+    }
+  };
+  const openHistory = async (item: ExternalHistoryItem, mode: 'resume' | 'restart' | 'review') => {
+    const operation = ++generation.current;
+    request.current?.abort();
+    setBusy(false);
+    const [progress, storedSubtitle, position] = await Promise.all([
+      loadStoredTypingProgress(item.url),
+      loadStoredSubtitle(item.url),
+      loadStoredPlaybackPosition(item.url),
+    ]);
+    if (operation !== generation.current) return;
+    if (!storedSubtitle) throw new Error('字幕が削除されています。動画を選び直してください。');
+    const clip = historyPracticeClip({ ...item, subtitle: storedSubtitle });
+    const video = RECOMMENDED_VIDEOS.find(
+      (video) => video.videoId === (clip.source.kind === 'youtube' ? clip.source.videoId : ''),
+    );
+    const reviewFrames =
+      mode === 'review' ? buildStoredSubtitleTypeReviewFrames(storedSubtitle, progress) : [];
+    if (mode === 'restart')
+      await replaceStoredTypingProgress(item.url, restartTypingProgress(progress));
+    if (operation !== generation.current) return;
+    const review = mode === 'review';
+    if (review && !reviewFrames.length) throw new Error('復習する問題はありません。');
+    await saveExternalHistoryMeta(item.url, { title: item.title, updatedAt: Date.now() });
+    if (operation !== generation.current) return;
+    setActive({
+      clip: review
+        ? {
+            ...clip,
+            start: reviewFrames[0].cue.start,
+            end: reviewFrames[reviewFrames.length - 1].cue.end,
+            cues: reviewFrames.map((frame) => frame.cue),
+          }
+        : clip,
+      originalClip: clip,
+      originalTypingFrames: storedSubtitle.typingFrames,
+      fileName: storedSubtitle.fileName,
+      displaySubtitle: storedSubtitle.displaySubtitleCues?.length
+        ? { fileName: storedSubtitle.displaySubtitleFileName || '日本語字幕', cues: storedSubtitle.displaySubtitleCues }
+        : undefined,
+      video,
+      storageKey: item.url,
+      tutorial: false,
+      run: ++run.current,
+      typeReviewMode: mode !== 'resume',
+      initialProgress: review
+        ? createTypeReviewTypingProgress(reviewFrames)
+        : mode === 'restart'
+          ? restartTypingProgress(progress)
+          : progress,
+      typingFrames: review
+        ? reviewFrames.map((frame) => ({ ...frame.frame, tags: frame.tags }))
+        : storedSubtitle.typingFrames,
+      initialTime:
+        mode === 'resume'
+          ? position?.currentTime
+          : review
+            ? reviewFrames[0].cue.start
+            : clip.start,
+    });
+  };
+  const retry = async (progress: StoredTypingProgressData) => {
+    if (!active) return;
+    const operation = ++generation.current;
+    const previous = active;
+    const base = previous.originalClip || previous.clip;
+    const key = previous.storageKey || practiceStorageKey(base);
+    setActive(null);
+    setBusy(true);
+    try {
+      const stored = await loadStoredTypingProgress(key);
+      if (operation !== generation.current) return;
+      const initialProgress = restartTypingProgress({ ...stored, ...progress });
+      await replaceStoredTypingProgress(key, initialProgress);
+      if (operation !== generation.current) return;
+      setActive({
+        ...previous,
+        clip: base,
+        originalClip: base,
+        initialProgress,
+        initialTime: base.start,
+        typingFrames: previous.originalTypingFrames,
+        storageKey: key,
+        typeReviewMode: true,
+        tutorial: previous.tutorial && !learned(),
+        run: ++run.current,
+      });
+    } catch (error) {
+      if (operation === generation.current) setStatus((error as Error).message);
+    } finally {
+      if (operation === generation.current) setBusy(false);
     }
   };
   const selectedCues = useMemo(() => {
@@ -204,12 +350,12 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         displayMode={displayMode}
         onTutorialCompleted={markTutorialCompleted}
         onBack={() => {
+          generation.current += 1;
           setActive(null);
+          setHistoryRevision((value) => value + 1);
           if (learned()) setWithTutorial(false);
         }}
-        onRetry={() =>
-          setActive({ ...active, tutorial: active.tutorial && !learned(), run: ++run.current })
-        }
+        onRetry={retry}
       />
     );
   return (
@@ -342,6 +488,12 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
             </button>
           </details>
         )}
+        <PracticeHistory
+          revision={historyRevision}
+          onResume={(item) => openHistory(item, 'resume')}
+          onRestart={(item) => openHistory(item, 'restart')}
+          onReview={(item) => openHistory(item, 'review')}
+        />
         {selection && (
           <section className="playerPanel clipEditor">
             <h2>クリップ選択 — {selection.title}</h2>
@@ -415,7 +567,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
                 type="button"
                 className="playerButton primary"
                 disabled={busy || !selectedCues.length}
-                onClick={() => { applyDisplayMode(displayMode); open(); }}
+                onClick={() => { applyDisplayMode(displayMode); void open(); }}
               >
                 開く
               </button>
@@ -485,7 +637,7 @@ function NormalPractice({
   displayMode: 'mini' | 'fullscreen';
   onTutorialCompleted: () => void;
   onBack: () => void;
-  onRetry: () => void;
+  onRetry: (progress: StoredTypingProgressData) => void | Promise<void>;
 }) {
   const { clip } = practice;
   const practiceRef = useRef<HTMLElement>(null);
@@ -493,7 +645,7 @@ function NormalPractice({
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<ClipSession | null>(null);
-  const progressRef = useRef<StoredTypingProgressData>({});
+  const progressRef = useRef<StoredTypingProgressData>(practice.initialProgress || {});
   const [snapshot, setSnapshot] = useState<ClipSnapshot>({
     status: 'loading',
     currentTime: clip.start,
@@ -515,11 +667,14 @@ function NormalPractice({
     return () => window.removeEventListener('resize', resized);
   }, []);
   const targetId = useMemo(() => `video-typing-clip-${Date.now()}-${practice.run}`, [practice.run]);
-  const frames = useMemo(() => clip.cues.map(subtitleCueToCaptionFrame), [clip]);
+  const frames = useMemo(
+    () => practice.typingFrames || clip.cues.map(subtitleCueToCaptionFrame),
+    [clip, practice.typingFrames],
+  );
   const range = useMemo(() => ({ start: clip.start, end: clip.end }), [clip]);
-  const emptyProgress = useMemo(() => ({}), []);
+  const initialProgress = useMemo(() => practice.initialProgress || {}, [practice.initialProgress]);
   const complete = snapshot.status === 'completed';
-  const storageKey = `practice:${clip.source.kind === 'youtube' ? clip.source.videoId : clip.id}:${clip.start}:${clip.end}`;
+  const storageKey = practice.storageKey || practiceStorageKey(clip);
   const receiveProgress = useCallback((progress: StoredTypingProgressData) => {
     progressRef.current = progress;
     if (Object.values(progress).some((frame) => frame.finishedCharIds.length > 0)) setDidType(true);
@@ -560,14 +715,24 @@ function NormalPractice({
       if (next.status !== 'idle' && next.status !== 'loading' && next.status !== 'error')
         setReady(true);
     });
-    void session.start();
+    void (async () => {
+      await session.start(false);
+      if (sessionRef.current !== session || session.getSnapshot().status === 'error') return;
+      if (practice.initialTime != null && Number.isFinite(practice.initialTime)) {
+        const resumeTime = Math.max(clip.start, Math.min(clip.end - 0.1, practice.initialTime));
+        // A redundant seek on a freshly cued player can enqueue a late pause
+        // after play. The loaded start already supplies the usual clip start.
+        if (Math.abs(adapter.getCurrentTime() - resumeTime) > 0.25) session.seek(resumeTime);
+      }
+      await session.play();
+    })();
     return () => {
       unsubscribe();
       bridge.dispose();
       session.destroy();
       sessionRef.current = null;
     };
-  }, [clip, frames, range, targetId]);
+  }, [clip, frames, range, targetId, practice.initialTime]);
   useEffect(() => {
     if (showTutorial && tour.stage === 'complete') {
       try {
@@ -626,7 +791,9 @@ function NormalPractice({
               initialSubtitleFileName={practice.fileName}
               displaySubtitleCues={practice.displaySubtitle?.cues}
               displaySubtitleFileName={practice.displaySubtitle?.fileName}
-              initialTypingProgress={emptyProgress}
+              initialTypingProgress={initialProgress}
+              initialTypingFrames={practice.typingFrames}
+              typeReviewMode={practice.typeReviewMode}
               pageUrl={storageKey}
               targetId={targetId}
               shadowRoot={document.head}
@@ -650,7 +817,7 @@ function NormalPractice({
           {snapshot.status === 'error' && (
             <div className="normalError" role="alert">
               {snapshot.error}
-              <button className="playerButton" onClick={onRetry}>
+              <button className="playerButton" onClick={() => void onRetry(progressRef.current)}>
                 読み込みを再試行
               </button>
               <button className="playerButton" onClick={onBack}>
@@ -667,7 +834,10 @@ function NormalPractice({
                   {tour.stage === 'complete' ? 'チュートリアル完了' : '誤入力した際には、誤答理由や辞書の使い方も案内します。'}
                 </p>
               )}
-              <button className="playerButton primary" onClick={onRetry}>
+              <button
+                className="playerButton primary"
+                onClick={() => void onRetry(progressRef.current)}
+              >
                 もう一度プレイ
               </button>
               <button className="playerButton" onClick={onBack}>

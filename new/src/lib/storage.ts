@@ -24,6 +24,15 @@ const PLAYBACK_STORAGE_KEY = 'videoTypingPrototypePlaybackPositions';
 const EXTERNAL_HISTORY_META_STORAGE_KEY = 'videoTypingPrototypeExternalHistoryMeta';
 const OVERLAY_CONFIG_STORAGE_KEY = 'videoTypingPrototypeOverlayConfig';
 
+// Serialize read/modify/write progress updates in this UI context. A finished-
+// character write and a tag update must not overwrite one another.
+let progressWrites: Promise<unknown> = Promise.resolve();
+function writeProgress(action: () => Promise<void>): Promise<void> {
+  const next = progressWrites.catch(() => undefined).then(action);
+  progressWrites = next;
+  return next;
+}
+
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   slowPlayback: {
     enabled: true,
@@ -39,7 +48,10 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
 
 export type PlaybackPositionMode = 'typing' | 'type-review';
 
-export function createPlaybackPositionStorageKey(storageKey: string, mode: PlaybackPositionMode = 'typing') {
+export function createPlaybackPositionStorageKey(
+  storageKey: string,
+  mode: PlaybackPositionMode = 'typing',
+) {
   return mode === 'typing' ? storageKey : `playback:type-review:${storageKey}`;
 }
 
@@ -49,7 +61,11 @@ export async function loadPanelPosition(hostname: string, kind: PanelKind) {
   return positions[hostname]?.[kind];
 }
 
-export async function savePanelPosition(hostname: string, kind: PanelKind, position: PanelPosition) {
+export async function savePanelPosition(
+  hostname: string,
+  kind: PanelKind,
+  position: PanelPosition,
+) {
   const result = await localStorageArea.get(STORAGE_KEY);
   const positions = (result[STORAGE_KEY] || {}) as StoredPanelPositions;
   const next = {
@@ -111,12 +127,15 @@ export async function saveStoredSubtitle(url: string, subtitle: StoredSubtitleDa
 
 export async function deleteStoredSubtitle(url: string) {
   const result = await localStorageArea.get(SUBTITLE_STORAGE_KEY);
-  const subtitles = { ...((result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>) };
+  const subtitles = {
+    ...((result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>),
+  };
   delete subtitles[url];
   await localStorageArea.set({ [SUBTITLE_STORAGE_KEY]: subtitles });
 }
 
 export async function loadStoredTypingProgress(url: string) {
+  await progressWrites.catch(() => undefined);
   const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
   return normalizeTypingProgress(progress[url]);
@@ -127,56 +146,87 @@ export async function saveStoredTypingProgress(
   frameId: string,
   frameProgress: StoredFrameProgressData,
 ) {
-  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
-  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
-  const currentUrlProgress = normalizeTypingProgress(progress[url]);
-  await localStorageArea.set({
-    [PROGRESS_STORAGE_KEY]: {
-      ...progress,
-      [url]: {
-        ...currentUrlProgress,
-        [frameId]: normalizeFrameProgress(frameProgress),
+  return writeProgress(async () => {
+    const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
+    const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const currentUrlProgress = normalizeTypingProgress(progress[url]);
+    await localStorageArea.set({
+      [PROGRESS_STORAGE_KEY]: {
+        ...progress,
+        [url]: {
+          ...currentUrlProgress,
+          [frameId]: normalizeFrameProgress(frameProgress),
+        },
       },
-    },
+    });
   });
 }
 
 export async function deleteStoredFrameTypingProgress(url: string, frameId: string) {
-  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
-  const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
-  const currentUrlProgress = normalizeTypingProgress(progress[url]);
+  return writeProgress(async () => {
+    const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
+    const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const currentUrlProgress = normalizeTypingProgress(progress[url]);
 
-  if (!(frameId in currentUrlProgress)) {
-    return;
-  }
+    if (!(frameId in currentUrlProgress)) {
+      return;
+    }
 
-  const nextUrlProgress = { ...currentUrlProgress };
-  delete nextUrlProgress[frameId];
+    const nextUrlProgress = { ...currentUrlProgress };
+    delete nextUrlProgress[frameId];
 
-  await localStorageArea.set({
-    [PROGRESS_STORAGE_KEY]: {
-      ...progress,
-      [url]: nextUrlProgress,
-    },
+    await localStorageArea.set({
+      [PROGRESS_STORAGE_KEY]: {
+        ...progress,
+        [url]: nextUrlProgress,
+      },
+    });
   });
 }
 
 export async function deleteStoredTypingProgress(url: string) {
-  const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
-  const progress = { ...((result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>) };
-  delete progress[url];
-  await localStorageArea.set({ [PROGRESS_STORAGE_KEY]: progress });
+  return writeProgress(async () => {
+    const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
+    const progress = {
+      ...((result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>),
+    };
+    delete progress[url];
+    await localStorageArea.set({ [PROGRESS_STORAGE_KEY]: progress });
+  });
+}
+
+/** Replace one clip's state for an explicit retry without disturbing other videos. */
+export async function replaceStoredTypingProgress(url: string, next: StoredTypingProgressData) {
+  return writeProgress(async () => {
+    const result = await localStorageArea.get(PROGRESS_STORAGE_KEY);
+    const all = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
+    await localStorageArea.set({
+      [PROGRESS_STORAGE_KEY]: { ...all, [url]: normalizeTypingProgress(next) },
+    });
+  });
 }
 
 export async function loadStoredPlaybackPosition(url: string) {
   const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
-  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredPlaybackPositionData
+  >;
   return positions[url];
 }
 
 export async function saveStoredPlaybackPosition(url: string, currentTime: number) {
   const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
-  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredPlaybackPositionData
+  >;
   await localStorageArea.set({
     [PLAYBACK_STORAGE_KEY]: {
       ...positions,
@@ -187,20 +237,28 @@ export async function saveStoredPlaybackPosition(url: string, currentTime: numbe
 
 export async function deleteStoredPlaybackPosition(url: string) {
   const result = await localStorageArea.get(PLAYBACK_STORAGE_KEY);
-  const positions = { ...((result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>) };
+  const positions = {
+    ...((result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>),
+  };
   delete positions[url];
   await localStorageArea.set({ [PLAYBACK_STORAGE_KEY]: positions });
 }
 
 export async function loadExternalHistoryMeta(url: string) {
   const result = await localStorageArea.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
-  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredExternalHistoryMeta
+  >;
   return meta[url];
 }
 
 export async function saveExternalHistoryMeta(url: string, nextMeta: StoredExternalHistoryMeta) {
   const result = await localStorageArea.get(EXTERNAL_HISTORY_META_STORAGE_KEY);
-  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredExternalHistoryMeta
+  >;
   await localStorageArea.set({
     [EXTERNAL_HISTORY_META_STORAGE_KEY]: {
       ...meta,
@@ -220,6 +278,7 @@ export async function clearStoredSubtitleSetting(url: string) {
 }
 
 export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]> {
+  await progressWrites.catch(() => undefined);
   const result = await localStorageArea.get([
     SUBTITLE_STORAGE_KEY,
     PROGRESS_STORAGE_KEY,
@@ -228,8 +287,14 @@ export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]>
   ]);
   const subtitles = (result[SUBTITLE_STORAGE_KEY] || {}) as Record<string, StoredSubtitleData>;
   const progress = (result[PROGRESS_STORAGE_KEY] || {}) as Record<string, Record<string, unknown>>;
-  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<string, StoredPlaybackPositionData>;
-  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<string, StoredExternalHistoryMeta>;
+  const positions = (result[PLAYBACK_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredPlaybackPositionData
+  >;
+  const meta = (result[EXTERNAL_HISTORY_META_STORAGE_KEY] || {}) as Record<
+    string,
+    StoredExternalHistoryMeta
+  >;
   const urls = new Set([
     ...Object.keys(subtitles),
     ...Object.keys(progress),
@@ -252,10 +317,13 @@ export async function listExternalHistoryItems(): Promise<ExternalHistoryItem[]>
         playbackPosition: positions[url],
         meta: itemMeta,
       };
-    }).sort((left, right) => right.updatedAt - left.updatedAt);
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-function normalizeTypingProgress(progress: Record<string, unknown> | undefined): StoredTypingProgressData {
+function normalizeTypingProgress(
+  progress: Record<string, unknown> | undefined,
+): StoredTypingProgressData {
   if (!progress) {
     return {};
   }
@@ -288,18 +356,20 @@ function normalizeOverlayConfig(value: unknown): OverlayConfig {
 
   return {
     slowPlayback: {
-      enabled: typeof candidate.slowPlayback?.enabled === 'boolean'
-        ? candidate.slowPlayback.enabled
-        : DEFAULT_OVERLAY_CONFIG.slowPlayback.enabled,
+      enabled:
+        typeof candidate.slowPlayback?.enabled === 'boolean'
+          ? candidate.slowPlayback.enabled
+          : DEFAULT_OVERLAY_CONFIG.slowPlayback.enabled,
       mistakeThreshold: normalizePositiveInteger(
         candidate.slowPlayback?.mistakeThreshold,
         DEFAULT_OVERLAY_CONFIG.slowPlayback.mistakeThreshold,
       ),
     },
     nativeReplay: {
-      mistakeReplayEnabled: typeof candidate.nativeReplay?.mistakeReplayEnabled === 'boolean'
-        ? candidate.nativeReplay.mistakeReplayEnabled
-        : DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeReplayEnabled,
+      mistakeReplayEnabled:
+        typeof candidate.nativeReplay?.mistakeReplayEnabled === 'boolean'
+          ? candidate.nativeReplay.mistakeReplayEnabled
+          : DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeReplayEnabled,
       mistakeThreshold: normalizePositiveInteger(
         candidate.nativeReplay?.mistakeThreshold,
         DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeThreshold,
@@ -308,17 +378,16 @@ function normalizeOverlayConfig(value: unknown): OverlayConfig {
         candidate.nativeReplay?.mistakeInterval,
         DEFAULT_OVERLAY_CONFIG.nativeReplay.mistakeInterval,
       ),
-      completionReplayEnabled: typeof candidate.nativeReplay?.completionReplayEnabled === 'boolean'
-        ? candidate.nativeReplay.completionReplayEnabled
-        : DEFAULT_OVERLAY_CONFIG.nativeReplay.completionReplayEnabled,
+      completionReplayEnabled:
+        typeof candidate.nativeReplay?.completionReplayEnabled === 'boolean'
+          ? candidate.nativeReplay.completionReplayEnabled
+          : DEFAULT_OVERLAY_CONFIG.nativeReplay.completionReplayEnabled,
     },
   };
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number) {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0
-    ? value
-    : fallback;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function normalizeFrameProgress(frameProgress: unknown): StoredFrameProgressData {
@@ -388,16 +457,18 @@ function normalizeTags(value: unknown): Tag[] {
       return [];
     }
 
-    return [{
-      id: candidate.id,
-      pastedCharIds: candidate.pastedCharIds,
-      content: candidate.content,
-      hint: normalizeHintSelection(candidate.hint),
-    }];
+    return [
+      {
+        id: candidate.id,
+        pastedCharIds: candidate.pastedCharIds,
+        content: candidate.content,
+        hint: normalizeHintSelection(candidate.hint),
+      },
+    ];
   });
 }
 
-function normalizeHintSelection(value: unknown) {
+export function normalizeHintSelection(value: unknown) {
   if (!value || typeof value !== 'object') {
     return undefined;
   }
@@ -414,7 +485,8 @@ function normalizeHintSelection(value: unknown) {
     typeof candidate.headword !== 'string' ||
     typeof candidate.meaning !== 'string' ||
     typeof candidate.selectedText !== 'string' ||
-    typeof candidate.selectedAt !== 'number'
+    typeof candidate.selectedAt !== 'number' ||
+    !Number.isFinite(candidate.selectedAt)
   ) {
     return undefined;
   }
@@ -422,9 +494,8 @@ function normalizeHintSelection(value: unknown) {
   return {
     headword: candidate.headword,
     meaning: candidate.meaning,
-    dictionaryEntryKey: typeof candidate.dictionaryEntryKey === 'string'
-      ? candidate.dictionaryEntryKey
-      : undefined,
+    dictionaryEntryKey:
+      typeof candidate.dictionaryEntryKey === 'string' ? candidate.dictionaryEntryKey : undefined,
     selectedText: candidate.selectedText,
     selectedAt: candidate.selectedAt,
   };
@@ -438,9 +509,10 @@ function getLatestTypingProgressUpdatedAt(progress: StoredTypingProgressData) {
       continue;
     }
 
-    latestUpdatedAt = typeof latestUpdatedAt === 'number'
-      ? Math.max(latestUpdatedAt, frameProgress.updatedAt)
-      : frameProgress.updatedAt;
+    latestUpdatedAt =
+      typeof latestUpdatedAt === 'number'
+        ? Math.max(latestUpdatedAt, frameProgress.updatedAt)
+        : frameProgress.updatedAt;
   }
 
   return latestUpdatedAt;

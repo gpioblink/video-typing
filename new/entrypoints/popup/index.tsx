@@ -11,7 +11,8 @@ import {
   createUnknownWordCsv,
 } from '../../src/lib/localPlayerReview';
 import { subtitleCueToCaptionFrame } from '../../src/lib/subtitles';
-import { defaultClipRange, validateClipRange, type ClipRange } from '../../src/lib/clipLaunch';
+import { createAnkiTsv } from '../../src/lib/ankiExport';
+import { createClipStorageKey, defaultClipRange, readVideoClipContext, validateClipRange, type ClipRange } from '../../src/lib/clipLaunch';
 import type {
   StoredSubtitleData,
   StoredTypingProgressData,
@@ -25,6 +26,8 @@ interface TabContext {
   url: string;
   title: string;
   video: CurrentVideoInfo | null;
+  storageKey: string;
+  range?: ClipRange;
 }
 
 interface CurrentVideoInfo {
@@ -35,6 +38,7 @@ interface CurrentVideoInfo {
   duration: number;
   paused: boolean;
   hasVideo: boolean;
+  clipContext: string | null;
 }
 
 interface PopupState {
@@ -63,12 +67,12 @@ function PopupApp() {
 
     try {
       const context = await loadCurrentTabContext();
-      const range = defaultClipRange(context.video?.currentTime ?? 0, context.video?.duration ?? 0);
+      const range = context.range || defaultClipRange(context.video?.currentTime ?? 0, context.video?.duration ?? 0);
       setClipStart(String(Number(range.start.toFixed(3))));
       setClipEnd(String(Number(range.end.toFixed(3))));
       const [subtitle, typingProgress] = await Promise.all([
-        loadStoredSubtitle(context.url),
-        loadStoredTypingProgress(context.url),
+        loadStoredSubtitle(context.storageKey),
+        loadStoredTypingProgress(context.storageKey),
       ]);
 
       setState({
@@ -112,7 +116,7 @@ function PopupApp() {
 
     setIsStarting(true);
     try {
-      const selectedRange = range === undefined ? undefined : validateClipRange(range);
+      const selectedRange = range === undefined ? state.context.range : validateClipRange(range);
       const response = await chrome.runtime.sendMessage({
         type: 'videoTypingStartOverlay',
         tabId: state.context.tabId,
@@ -153,6 +157,20 @@ function PopupApp() {
     }));
   };
 
+  const exportAnkiTsv = () => {
+    if (!state.subtitle || !state.context) {
+      setState(current => ({ ...current, status: '字幕データが見つかりません。' }));
+      return;
+    }
+    try {
+      const tsv = createAnkiTsv(state.subtitle, state.typingProgress, state.context.url);
+      downloadText(videoTitle, tsv, '-anki.tsv', 'text/tab-separated-values;charset=utf-8');
+      setState(current => ({ ...current, status: 'Anki用TSVを出力しました。' }));
+    } catch (error) {
+      setState(current => ({ ...current, status: error instanceof Error ? error.message : 'Anki用TSVを出力できませんでした。' }));
+    }
+  };
+
   const deleteProgress = async () => {
     if (!state.context) {
       return;
@@ -167,7 +185,7 @@ function PopupApp() {
     }
 
     try {
-      await clearStoredProgressState(state.context.url);
+      await clearStoredProgressState(state.context.storageKey);
       setShowSubtitles(false);
       await loadState('進捗データを削除しました。');
     } catch {
@@ -189,7 +207,7 @@ function PopupApp() {
     }
 
     try {
-      await clearStoredSubtitleSetting(state.context.url);
+      await clearStoredSubtitleSetting(state.context.storageKey);
       setShowSubtitles(false);
       await loadState('字幕データを削除しました。');
     } catch {
@@ -283,6 +301,9 @@ function PopupApp() {
             >
               知らなかった単語をCSV出力
             </button>
+            <button className="button" type="button" disabled={!state.subtitle} onClick={exportAnkiTsv}>
+              Anki TSV出力
+            </button>
             <button
               className="button"
               type="button"
@@ -342,7 +363,10 @@ async function loadCurrentTabContext(): Promise<TabContext> {
     func: getCurrentVideoInfo,
   });
   const video = (result?.result || null) as CurrentVideoInfo | null;
-  const url = tab.url || video?.url || '';
+  const currentUrl = tab.url || video?.url || '';
+  const clipContext = readVideoClipContext(currentUrl, video?.clipContext);
+  // Keep the validated launch URL stable across native time/track URL changes.
+  const url = clipContext?.sourcePageUrl || currentUrl;
 
   if (!url || url.startsWith('chrome://')) {
     throw new Error('This tab cannot run video-typing.');
@@ -353,12 +377,15 @@ async function loadCurrentTabContext(): Promise<TabContext> {
     url,
     title: tab.title || video?.title || url,
     video,
+    storageKey: clipContext ? createClipStorageKey(url, clipContext.range) : url,
+    range: clipContext?.range,
   };
 }
 
 function getCurrentVideoInfo(): CurrentVideoInfo {
   const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
-  const video = videos.find((item) => !item.paused)
+  const video = videos.find((item) => item.hasAttribute('data-video-typing-clip-context'))
+    || videos.find((item) => !item.paused)
     || videos.find((item) => item.currentTime > 0)
     || videos
       .slice()
@@ -382,6 +409,7 @@ function getCurrentVideoInfo(): CurrentVideoInfo {
     duration: Number.isFinite(video?.duration) ? video.duration : 0,
     paused: Boolean(video?.paused),
     hasVideo: Boolean(video),
+    clipContext: video?.getAttribute('data-video-typing-clip-context') || null,
   };
 
   function getMetaContent(selector: string) {
@@ -464,14 +492,20 @@ function sanitizeFileName(value: string) {
 }
 
 function downloadCsv(title: string, csv: string) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  downloadText(title, csv, '-unknown-words.csv', 'text/csv;charset=utf-8');
+}
 
+function downloadText(title: string, content: string, suffix: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement('a');
   link.href = url;
-  link.download = `${sanitizeFileName(title)}-unknown-words.csv`;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  link.download = `${sanitizeFileName(title)}${suffix}`;
+  document.body.append(link);
+  try { link.click(); }
+  finally {
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<PopupApp />);

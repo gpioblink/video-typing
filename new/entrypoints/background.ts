@@ -75,7 +75,6 @@ export default defineBackground(() => {
 
 async function startOverlay(tabId: number, url: string, mode: 'typing' | 'type-review', rangeInput?: unknown) {
   const range = rangeInput === undefined ? undefined : validateClipRange(rangeInput);
-  if (range && mode !== 'typing') throw new Error('区間の起動は通常のタイピングで行ってください。');
   if (!tabId || !url || url.startsWith('chrome://')) {
     throw new Error('This tab cannot run video-typing.');
   }
@@ -90,10 +89,10 @@ async function startOverlay(tabId: number, url: string, mode: 'typing' | 'type-r
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: (launchOptions: { mode: 'typing' | 'type-review'; range?: ClipRange }) => {
+    func: (launchOptions: { mode: 'typing' | 'type-review'; range?: ClipRange; sourcePageUrl?: string }) => {
       (window as any).__videoTypingPrototypeLaunchOptions__ = launchOptions;
     },
-    args: [{ mode, range }],
+    args: [{ mode, range, sourcePageUrl: url }],
   });
 
   await chrome.scripting.executeScript({

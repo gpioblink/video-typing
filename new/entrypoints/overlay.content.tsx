@@ -9,7 +9,6 @@ import {
   loadStoredSubtitle,
   loadStoredTypingProgress,
   saveExternalHistoryMeta,
-  saveStoredPlaybackPosition,
   saveStoredSubtitle,
 } from '../src/lib/storage';
 import { isChineseTypingJsonFile, parseChineseTypingJson } from '../src/lib/chineseTyping';
@@ -29,7 +28,7 @@ import {
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../src/lib/subtitles';
 import { showToast } from '../src/lib/toast';
 import { seekVideo } from '../src/lib/video';
-import { createClipStorageKey, selectSubtitleForClip, validateClipRange, type ClipRange } from '../src/lib/clipLaunch';
+import { createClipStorageKey, readVideoClipContext, selectSubtitleForClip, validateClipRange, videoPageIdentity, VIDEO_CLIP_CONTEXT_ATTRIBUTE, type ClipRange } from '../src/lib/clipLaunch';
 import type { StoredSubtitleData } from '../src/types';
 
 const OVERLAY_KEY = '__videoTypingPrototypeOverlay__';
@@ -55,6 +54,7 @@ declare global {
     __videoTypingPrototypeLaunchOptions__?: {
       mode?: 'typing' | 'type-review';
       range?: ClipRange;
+      sourcePageUrl?: string;
     };
   }
 }
@@ -67,13 +67,15 @@ export default defineContentScript({
     delete window.__videoTypingPrototypeLaunchOptions__;
 
     const video = document.querySelector('video');
-    const pageUrl = window.location.href;
+    const currentPageUrl = window.location.href;
+    const pageIdentity = videoPageIdentity(currentPageUrl);
+    const pageTitle = document.title || currentPageUrl;
+    const isCurrentPage = () => !ctx.isInvalid && videoPageIdentity(window.location.href) === pageIdentity;
     const isNetflixPage = isNetflixHostname(window.location.hostname);
     const requestedTypeReviewMode = launchOptions.mode === 'type-review';
     let range: ClipRange | undefined;
     try {
       range = launchOptions.range === undefined ? undefined : validateClipRange(launchOptions.range);
-      if (range && requestedTypeReviewMode) throw new Error('区間の起動は通常のタイピングで行ってください。');
     } catch (error) { showToast((error as Error).message); return; }
 
     if (!video) {
@@ -85,47 +87,59 @@ export default defineContentScript({
       showToast('終了秒が動画の長さを超えています。');
       return;
     }
+    const previousClip = readVideoClipContext(currentPageUrl, video.getAttribute(VIDEO_CLIP_CONTEXT_ATTRIBUTE));
+    const sameClip = range && previousClip && range.start === previousClip.range.start && range.end === previousClip.range.end;
+    const requestedContext = range ? readVideoClipContext(currentPageUrl, JSON.stringify({ sourcePageUrl: launchOptions.sourcePageUrl, range })) : undefined;
+    const pageUrl = requestedContext?.sourcePageUrl || (sameClip ? previousClip.sourcePageUrl : currentPageUrl);
     const progressStorageKey = range ? createClipStorageKey(pageUrl, range) : pageUrl;
     const playbackStorageKey = createPlaybackPositionStorageKey(
       progressStorageKey,
       requestedTypeReviewMode ? 'type-review' : 'typing',
     );
     const storedPlaybackPosition = await loadStoredPlaybackPosition(playbackStorageKey);
-    const storedSubtitle = await loadStoredSubtitle(pageUrl);
+    const storedSourceSubtitle = await loadStoredSubtitle(pageUrl);
+    const storedClipSubtitle = range ? await loadStoredSubtitle(progressStorageKey) : undefined;
     const storedTypingProgress = await loadStoredTypingProgress(progressStorageKey);
-    let subtitleFile = storedSubtitle || (range && isNetflixPage
+    const loadedSubtitle = storedSourceSubtitle || storedClipSubtitle || (range && isNetflixPage
       ? await requestNetflixAutoSubtitleFile() || await requestSubtitleFile({ allowNetflixAuto: true })
       : await requestSubtitleFile({ allowNetflixAuto: isNetflixPage }));
     let typingProgress = storedTypingProgress;
     let typeReviewMode = false;
 
-    if (!subtitleFile) {
+    if (!loadedSubtitle) {
       showToast('Subtitle file is required. Overlay was not started.');
       return;
     }
+    if (!isCurrentPage()) {
+      showToast('動画が切り替わったため、字幕の起動を中止しました。');
+      return;
+    }
 
-    let storedSubtitleForUpdates = storedSubtitle || subtitleFile;
+    // Preserve the full source under its page URL and the exact clipped frame
+    // timings under the clip key used by progress, popup exports and review.
+    let sourceSubtitleForUpdates = storedSourceSubtitle || (!storedClipSubtitle ? loadedSubtitle : undefined);
+    let clipSubtitleForUpdates: StoredSubtitleData;
+    try {
+      clipSubtitleForUpdates = range
+        ? storedClipSubtitle || selectSubtitleForClip(loadedSubtitle, range)
+        : loadedSubtitle;
+    } catch (error) { showToast((error as Error).message); return; }
+    let subtitleFile = clipSubtitleForUpdates;
 
     if (requestedTypeReviewMode) {
-      if (!storedSubtitle) {
+      if (!storedSourceSubtitle && !storedClipSubtitle) {
         showToast('Stored subtitle data is required for review game.');
         return;
       }
-
-      const typeReviewFrames = buildStoredSubtitleTypeReviewFrames(storedSubtitle, storedTypingProgress);
-
+      const typeReviewFrames = buildStoredSubtitleTypeReviewFrames(clipSubtitleForUpdates, storedTypingProgress);
       if (typeReviewFrames.length === 0) {
-        showToast('No ignorance or unaudible cues to review.');
+        showToast('No ignorance, unaudible or spelling cues to review.');
         return;
       }
-
       subtitleFile = {
-        ...storedSubtitle,
-        cues: typeReviewFrames.map((reviewFrame) => reviewFrame.cue),
-        typingFrames: typeReviewFrames.map((reviewFrame) => ({
-          ...reviewFrame.frame,
-          tags: reviewFrame.tags,
-        })),
+        ...clipSubtitleForUpdates,
+        cues: typeReviewFrames.map(reviewFrame => reviewFrame.cue),
+        typingFrames: typeReviewFrames.map(reviewFrame => ({ ...reviewFrame.frame, tags: reviewFrame.tags })),
         displaySubtitleCues: undefined,
         displaySubtitleFileName: undefined,
       };
@@ -133,31 +147,38 @@ export default defineContentScript({
       typeReviewMode = true;
     }
 
-    if (range) {
-      try { subtitleFile = selectSubtitleForClip(subtitleFile, range); }
-      catch (error) { showToast((error as Error).message); return; }
+    await saveExternalHistoryMeta(pageUrl, { title: pageTitle, updatedAt: Date.now() });
+    if (!storedSourceSubtitle && sourceSubtitleForUpdates) {
+      await saveStoredSubtitle(pageUrl, sourceSubtitleForUpdates);
     }
+    if (range) await saveStoredSubtitle(progressStorageKey, clipSubtitleForUpdates);
 
-    await saveExternalHistoryMeta(pageUrl, {
-      title: document.title || pageUrl,
-      updatedAt: Date.now(),
-    });
+    const saveSubtitleSettings = async (patch: Partial<StoredSubtitleData>) => {
+      if (sourceSubtitleForUpdates) {
+        sourceSubtitleForUpdates = { ...sourceSubtitleForUpdates, ...patch };
+        await saveStoredSubtitle(pageUrl, sourceSubtitleForUpdates);
+      }
+      clipSubtitleForUpdates = { ...clipSubtitleForUpdates, ...patch };
+      subtitleFile = { ...subtitleFile, ...patch };
+      if (range) await saveStoredSubtitle(progressStorageKey, clipSubtitleForUpdates);
+    };
 
-    if (!storedSubtitle) {
-      await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
-    }
-
-    const previousTargetId = video.getAttribute(VIDEO_ATTR);
-    if (previousTargetId) {
-      const previousPlaybackStorageKey = video.getAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR) || pageUrl;
-      await saveStoredPlaybackPosition(previousPlaybackStorageKey, video.currentTime);
-    }
-
+    if (!isCurrentPage()) return;
+    // The previous overlay owns persistence through its captured storage key.
+    // Never use a storage-key attribute supplied by the host page for writes.
     window[OVERLAY_KEY]?.remove();
 
     const targetId = `video-typing-${Date.now()}`;
     video.setAttribute(VIDEO_ATTR, targetId);
     video.setAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR, playbackStorageKey);
+    if (range) video.setAttribute(VIDEO_CLIP_CONTEXT_ATTRIBUTE, JSON.stringify({ sourcePageUrl: pageUrl, range }));
+    else video.removeAttribute(VIDEO_CLIP_CONTEXT_ATTRIBUTE);
+    const clearTargetAttributes = () => {
+      if (video.getAttribute(VIDEO_ATTR) !== targetId) return;
+      video.removeAttribute(VIDEO_ATTR);
+      video.removeAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR);
+      video.removeAttribute(VIDEO_CLIP_CONTEXT_ATTRIBUTE);
+    };
     if (subtitleFile.netflix?.englishAudioTrackId) {
       void setNetflixAudioTrack(subtitleFile.netflix.englishAudioTrackId).catch(() => undefined);
     }
@@ -165,17 +186,18 @@ export default defineContentScript({
       await restorePlaybackPosition(
         video,
         targetId,
-        range?.start ?? (typeReviewMode
+        typeReviewMode
           ? storedPlaybackPosition?.currentTime ?? subtitleFile.cues[0]?.start
-          : getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime),
+          : getResumePlaybackPosition(subtitleFile, storedTypingProgress) ?? storedPlaybackPosition?.currentTime ?? range?.start,
         range,
+        isCurrentPage,
       );
     } catch (error) {
-      video.removeAttribute(VIDEO_ATTR);
-      video.removeAttribute(VIDEO_PLAYBACK_STORAGE_KEY_ATTR);
+      clearTargetAttributes();
       showToast((error as Error).message);
       return;
     }
+    if (!isCurrentPage()) { clearTargetAttributes(); return; }
 
     const ui = await createShadowRootUi(ctx, {
       name: 'video-typing-overlay',
@@ -207,35 +229,20 @@ export default defineContentScript({
             onNetflixSubtitleTrackChange={isNetflixPage
               ? async (trackId) => {
                 const nativeSubtitle = await fetchNetflixSubtitle(trackId);
+                if (!isCurrentPage()) throw new Error('動画が切り替わったため字幕の変更を中止しました。');
                 const cues = parseSubtitleFile(nativeSubtitle.fileName, nativeSubtitle.text);
 
                 if (cues.length === 0) {
                   throw new Error('No usable Netflix subtitle cues found.');
                 }
 
-                storedSubtitleForUpdates = {
-                  ...storedSubtitleForUpdates,
-                  displaySubtitleFileName: nativeSubtitle.fileName,
-                  displaySubtitleCues: cues,
-                  netflix: storedSubtitleForUpdates.netflix
-                    ? {
-                      ...storedSubtitleForUpdates.netflix,
-                      nativeSubtitleTrackId: trackId,
-                    }
-                    : storedSubtitleForUpdates.netflix,
-                };
-                subtitleFile = {
-                  ...subtitleFile,
+                await saveSubtitleSettings({
                   displaySubtitleFileName: nativeSubtitle.fileName,
                   displaySubtitleCues: cues,
                   netflix: subtitleFile.netflix
-                    ? {
-                      ...subtitleFile.netflix,
-                      nativeSubtitleTrackId: trackId,
-                    }
-                    : subtitleFile.netflix,
-                };
-                await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
+                    ? { ...subtitleFile.netflix, nativeSubtitleTrackId: trackId }
+                    : undefined,
+                });
                 return {
                   fileName: nativeSubtitle.fileName,
                   cues,
@@ -244,17 +251,7 @@ export default defineContentScript({
               : undefined}
             onNativeCueReplay={(cue) => replayNetflixNativeCue(subtitleFile, cue)}
             onDisplaySubtitleChange={async (fileName, cues) => {
-              storedSubtitleForUpdates = {
-                ...storedSubtitleForUpdates,
-                displaySubtitleFileName: fileName,
-                displaySubtitleCues: cues,
-              };
-              subtitleFile = {
-                ...subtitleFile,
-                displaySubtitleFileName: fileName,
-                displaySubtitleCues: cues,
-              };
-              await saveStoredSubtitle(pageUrl, storedSubtitleForUpdates);
+              await saveSubtitleSettings({ displaySubtitleFileName: fileName, displaySubtitleCues: cues });
             }}
             pageUrl={progressStorageKey}
             playbackRange={range}
@@ -273,23 +270,41 @@ export default defineContentScript({
     });
 
     const persistExternalHistoryMeta = () => {
-      void saveExternalHistoryMeta(pageUrl, {
-        title: document.title || pageUrl,
-        updatedAt: Date.now(),
-      });
+      void saveExternalHistoryMeta(pageUrl, { title: pageTitle, updatedAt: Date.now() }).catch(() => undefined);
     };
-
-    window[OVERLAY_KEY] = {
-      remove: () => {
-        window.removeEventListener('pagehide', persistExternalHistoryMeta);
-        ui.remove();
-      },
+    let removed = false;
+    let navigationTimer: number | undefined;
+    let stopInvalidation = () => {};
+    const navigationEvents = ['popstate', 'hashchange', 'yt-navigate-finish'];
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      if (navigationTimer !== undefined) window.clearInterval(navigationTimer);
+      for (const event of navigationEvents) window.removeEventListener(event, onNavigation);
+      window.removeEventListener('pagehide', onPageHide);
+      stopInvalidation();
+      ui.remove();
+      clearTargetAttributes();
+      if (window[OVERLAY_KEY]?.remove === remove) delete window[OVERLAY_KEY];
     };
-
+    const onNavigation = () => {
+      if (!video.isConnected || videoPageIdentity(window.location.href) !== pageIdentity) {
+        remove();
+        showToast('動画が切り替わったため、タイピングを終了しました。新しい動画で開き直してください。');
+      }
+    };
+    const onPageHide = () => { persistExternalHistoryMeta(); remove(); };
+    if (!isCurrentPage()) { clearTargetAttributes(); return; }
+    window[OVERLAY_KEY] = { remove };
+    stopInvalidation = ctx.onInvalidated(remove);
     ui.mount();
-    if (range) void video.play().catch(() => showToast('動画の再生ボタンを押して練習を始めてください。'));
+    for (const event of navigationEvents) window.addEventListener(event, onNavigation);
+    navigationTimer = window.setInterval(onNavigation, 500);
+    window.addEventListener('pagehide', onPageHide, { once: true });
+    if (range) void video.play().catch(() => {
+      if (!removed) showToast('動画の再生ボタンを押して練習を始めてください。');
+    });
 
-    window.addEventListener('pagehide', persistExternalHistoryMeta, { once: true });
   },
 });
 
@@ -420,15 +435,17 @@ async function requestChineseTypingJsonFiles(fileName: string, text: string): Pr
   }
 }
 
-async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string, currentTime?: number, range?: ClipRange) {
+async function restorePlaybackPosition(video: HTMLVideoElement, targetId: string, currentTime?: number, range?: ClipRange, isCurrentPage: () => boolean = () => true) {
   if (currentTime == null || !Number.isFinite(currentTime)) {
     return;
   }
 
   const apply = () => {
+    if (!isCurrentPage()) throw new Error('動画が切り替わったため再生位置の復元を中止しました。');
     if (range && Number.isFinite(video.duration) && range.end > video.duration + 0.25) throw new Error('終了秒が動画の長さを超えています。');
     const duration = Number.isFinite(video.duration) ? video.duration : currentTime;
-    seekVideo(targetId, Math.min(currentTime, duration));
+    const nextTime = range ? Math.max(range.start, Math.min(range.end, currentTime)) : currentTime;
+    seekVideo(targetId, Math.min(nextTime, duration));
   };
 
   if (video.readyState >= 1) {

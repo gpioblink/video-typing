@@ -23,8 +23,16 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
   expect(Math.abs(await frame.evaluate(() => document.querySelector('video')!.currentTime) - paused)).toBeLessThan(0.2);
   await frame.evaluate(() => (document.getElementById('movie_player') as any).playVideo());
   await page.getByRole('region', { name: 'Subtitle', exact: true }).getByRole('button', { name: '英語（答え）', exact: true }).click();
-  const keyboard = typing.locator('[tabindex="0"]'); await keyboard.focus();
+  const keyboard = typing.locator('[tabindex="0"]');
   await expect.poll(state).toBe(1);
+  const config = page.getByRole('region', { name: 'Config', exact: true });
+  await config.getByRole('button', { name: 'Configを開く' }).click();
+  await config.getByLabel('再生速度', { exact: true }).selectOption('0.75');
+  await expect.poll(() => frame.evaluate(() => document.querySelector('video')!.playbackRate)).toBe(0.75);
+  await config.getByLabel('再生速度', { exact: true }).selectOption('1');
+  await config.getByRole('button', { name: 'Configを折りたたむ' }).click();
+  await expect.poll(() => frame.evaluate(() => document.querySelector('video')!.playbackRate)).toBe(1);
+  await keyboard.focus();
   const text = readFileSync(resolve('public', video.subtitle.url), 'utf8');
   const seconds = (time: string) => { const [h, m, s] = time.trim().replace(',', '.').split(':').map(Number); return h * 3600 + m * 60 + s; };
   const range = video.clips[0]; let cueIndex = 0;

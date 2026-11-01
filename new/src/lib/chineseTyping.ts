@@ -1,3 +1,4 @@
+import { normalizeHintSelection } from './storage';
 import type {
   ChineseTypingJson,
   ChineseTypingWord,
@@ -40,10 +41,15 @@ export function parseChineseTypingJson(fileName: string, text: string): ChineseT
     throw new Error(`${fileName} has no sourceCues.`);
   }
 
+  const typingFrames = candidate.typingFrames.map(normalizeTimedCaptionFrame);
+  if (new Set(typingFrames.map(frame => frame.id)).size !== typingFrames.length) {
+    throw new Error('Duplicate typing frame ID.');
+  }
+
   return {
     format: CHINESE_TYPING_FORMAT,
     sourceFileName: candidate.sourceFileName,
-    typingFrames: candidate.typingFrames.map(normalizeTimedCaptionFrame),
+    typingFrames,
     sourceCues: candidate.sourceCues.map(normalizeSubtitleCue),
   };
 }
@@ -61,22 +67,40 @@ function normalizeTimedCaptionFrame(value: unknown): TimedCaptionFrame {
 
   if (
     typeof candidate.id !== 'string' ||
+    !candidate.id || Object.prototype.hasOwnProperty.call(Object.prototype, candidate.id) ||
     typeof candidate.start !== 'number' ||
     typeof candidate.end !== 'number' ||
     !Number.isFinite(candidate.start) ||
     !Number.isFinite(candidate.end) ||
+    candidate.start < 0 ||
+    candidate.end <= candidate.start ||
     !Array.isArray(candidate.caption)
   ) {
     throw new Error('Invalid typing frame shape.');
+  }
+
+  const caption = candidate.caption.map(normalizeChar);
+  const charPositions = new Map<string, number>();
+  caption.forEach((char, index) => {
+    if (charPositions.has(char.id)) throw new Error('Duplicate caption character ID.');
+    charPositions.set(char.id, index);
+  });
+  const words = Array.isArray(candidate.words) ? candidate.words.map(normalizeChineseTypingWord) : [];
+  for (const word of words) {
+    const startIndex = charPositions.get(word.startCharId);
+    const endIndex = charPositions.get(word.endCharId);
+    if (startIndex === undefined || endIndex === undefined || endIndex < startIndex) {
+      throw new Error('Invalid Chinese typing word range.');
+    }
   }
 
   return {
     id: candidate.id,
     start: candidate.start,
     end: candidate.end,
-    caption: candidate.caption.map(normalizeChar),
+    caption,
     tags: Array.isArray(candidate.tags) ? candidate.tags.map(normalizeTag) : [],
-    words: Array.isArray(candidate.words) ? candidate.words.map(normalizeChineseTypingWord) : [],
+    words,
   };
 }
 
@@ -92,7 +116,9 @@ function normalizeSubtitleCue(value: unknown): SubtitleCue {
     typeof candidate.end !== 'number' ||
     typeof candidate.text !== 'string' ||
     !Number.isFinite(candidate.start) ||
-    !Number.isFinite(candidate.end)
+    !Number.isFinite(candidate.end) ||
+    candidate.start < 0 ||
+    candidate.end <= candidate.start
   ) {
     throw new Error('Invalid source cue shape.');
   }
@@ -145,10 +171,12 @@ function normalizeTag(value: unknown): Tag {
     throw new Error('Invalid tag shape.');
   }
 
+  const hint = normalizeHintSelection(candidate.hint);
   return {
     id: candidate.id,
     pastedCharIds: candidate.pastedCharIds,
     content: candidate.content,
+    ...(hint ? { hint } : {}),
   };
 }
 

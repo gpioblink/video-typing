@@ -50,3 +50,44 @@ export function selectSubtitleForClip(subtitle: StoredSubtitleData, value: ClipR
   });
   return { ...subtitle, cues, typingFrames: frames };
 }
+
+export const VIDEO_CLIP_CONTEXT_ATTRIBUTE = 'data-video-typing-clip-context';
+
+/** Provider identity excludes navigation-only time, playlist and track params.
+ * Other pages keep their exact URL because their video identity is unknown. */
+export function videoPageIdentity(pageUrl: string): string {
+  let url: URL;
+  try { url = new URL(pageUrl); } catch { return pageUrl; }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return pageUrl;
+  let youtubeId: string | null = null;
+  if (url.hostname === 'youtu.be') youtubeId = url.pathname.slice(1);
+  if (['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(url.hostname)) {
+    youtubeId = url.pathname === '/watch' ? url.searchParams.get('v')
+      : /^\/(?:embed|shorts)\/([A-Za-z0-9_-]{11})$/.exec(url.pathname)?.[1] || null;
+  }
+  if (youtubeId && /^[A-Za-z0-9_-]{11}$/.test(youtubeId)) return `youtube:${youtubeId}`;
+  if (url.hostname === 'netflix.com' || url.hostname.endsWith('.netflix.com')) {
+    // Netflix watch IDs contain only decimal digits.
+    const watchId = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?watch\/(\d+)\/?$/i.exec(url.pathname)?.[1];
+    if (watchId) return `netflix:${watchId}`;
+  }
+  return pageUrl;
+}
+
+/** DOM is an untrusted input boundary. Never accept a supplied storage key. */
+export function readVideoClipContext(currentPageUrl: string, raw: unknown): {
+  sourcePageUrl: string;
+  range: ClipRange;
+} | undefined {
+  if (typeof raw !== 'string' || raw.length > 16384) return undefined;
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || typeof value.sourcePageUrl !== 'string'
+      || !value.sourcePageUrl || value.sourcePageUrl.length > 8192) return undefined;
+    const source = new URL(value.sourcePageUrl);
+    const current = new URL(currentPageUrl);
+    if (![source, current].every(url => ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password)) return undefined;
+    if (videoPageIdentity(value.sourcePageUrl) !== videoPageIdentity(currentPageUrl)) return undefined;
+    return { sourcePageUrl: value.sourcePageUrl, range: validateClipRange(value.range) };
+  } catch { return undefined; }
+}

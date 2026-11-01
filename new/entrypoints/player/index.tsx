@@ -30,6 +30,7 @@ import {
   type ReviewFrame,
 } from '../../src/lib/localPlayerReview';
 import { parseSubtitleFile, subtitleCueToCaptionFrame } from '../../src/lib/subtitles';
+import { createAnkiTsv } from '../../src/lib/ankiExport';
 import type {
   CaptionFrame,
   ExternalHistoryItem,
@@ -348,6 +349,23 @@ function PlayerApp() {
     }
   };
 
+  const handleExportAnkiTsv = async (session: StoredLocalPlayerSession) => {
+    try {
+      const progress = await loadStoredTypingProgress(createLocalPlayerStorageKey(session.id));
+      const tsv = createAnkiTsv({
+        fileName: session.subtitleFileName,
+        cues: session.subtitleCues,
+        typingFrames: session.typingFrames,
+        displaySubtitleFileName: session.nativeSubtitleFileName,
+        displaySubtitleCues: session.nativeSubtitleCues,
+      }, progress, '');
+      downloadText(session.title, tsv, '-anki.tsv', 'text/tab-separated-values;charset=utf-8');
+      setStatus('Anki用TSVを出力しました。');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Anki用TSVを出力できませんでした。');
+    }
+  };
+
   const handleOpenSubtitleReview = async (session: StoredLocalPlayerSession) => {
     try {
       const typingProgress = await loadStoredTypingProgress(createLocalPlayerStorageKey(session.id));
@@ -377,6 +395,21 @@ function PlayerApp() {
       setStatus(`Exported ${rows.length.toLocaleString()} unknown word rows.`);
     } catch {
       setStatus('Failed to export external site unknown words CSV.');
+    }
+  };
+
+  const handleExportExternalAnkiTsv = async (item: ExternalHistoryItem) => {
+    if (!item.subtitle) {
+      setStatus('External site subtitle setting is missing.');
+      return;
+    }
+    try {
+      const progress = await loadStoredTypingProgress(item.url);
+      const tsv = createAnkiTsv(item.subtitle, progress, item.url);
+      downloadText(item.title, tsv, '-anki.tsv', 'text/tab-separated-values;charset=utf-8');
+      setStatus('Anki用TSVを出力しました。');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Anki用TSVを出力できませんでした。');
     }
   };
 
@@ -622,6 +655,9 @@ function PlayerApp() {
                         >
                           CSV出力
                         </button>
+                        <button className="playerButton" type="button" onClick={() => void handleExportAnkiTsv(session)}>
+                          Anki TSV出力
+                        </button>
                         <button
                           className="playerButton"
                           type="button"
@@ -685,6 +721,9 @@ function PlayerApp() {
                           disabled={!item.subtitle}
                         >
                           CSV出力
+                        </button>
+                        <button className="playerButton" type="button" disabled={!item.subtitle} onClick={() => void handleExportExternalAnkiTsv(item)}>
+                          Anki TSV出力
                         </button>
                         <button
                           className="playerButton"
@@ -1000,15 +1039,20 @@ function sanitizeFileName(value: string) {
 }
 
 function downloadUnknownWordsCsv(title: string, rows: ReturnType<typeof createUnknownWordCsvRows>) {
-  const csv = createUnknownWordCsv(rows);
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  downloadText(title, createUnknownWordCsv(rows), '-unknown-words.csv', 'text/csv;charset=utf-8');
+}
 
+function downloadText(title: string, content: string, suffix: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement('a');
   link.href = url;
-  link.download = `${sanitizeFileName(title)}-unknown-words.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  link.download = `${sanitizeFileName(title)}${suffix}`;
+  document.body.append(link);
+  try { link.click(); }
+  finally {
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 function splitReviewGameCharsIntoRows(gameChars: GameChar[]) {
