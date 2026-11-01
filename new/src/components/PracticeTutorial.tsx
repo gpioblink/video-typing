@@ -1,17 +1,24 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-interface Props { step: 'play' | 'type' | 'replay' | 'finish'; onSkip: () => void }
+interface Props {
+  step: 'play' | 'type' | 'mistake' | 'reason' | 'dictionary' | 'complete';
+  onSkip: () => void;
+  reasonNeedsMeaning?: boolean;
+  onNext?: () => void;
+}
 interface Rect { left: number; top: number; width: number; height: number }
 interface Layout { spot: Rect | null; card: Rect }
 const MARGIN = 12;
 const GAP = 12;
 const CARD_WIDTH = 320;
 const COPY = {
-  play: { number: 1, title: 'まず動画を再生', text: '明るい「再生する」を押しましょう。動画中央の再生ボタンも使えます。再生が始まると入力欄を案内します。' },
-  type: { number: 1, title: 'ここで英字を入力', text: '明るいTyping欄をクリックして、聞こえた英字を入力しましょう。空白・記号は自動です。' },
-  replay: { number: 2, title: 'もう一度、聞いてみる', text: '明るい「聞き直す」を押してみましょう。入力したところはそのまま残ります。' },
-  finish: { number: 3, title: '最後まで入力してみる', text: 'Typing欄で続きを入力しましょう。未完了の問題は繰り返し再生されます。' },
+  play: { number: null, title: '動画を再生', text: 'ブラウザが自動再生を止めた場合は、動画の再生ボタンを押してください。' },
+  type: { number: 1, title: '聞こえたとおりに入力', text: '聞こえたとおりにタイプしてみましょう。記号や空白は入力不要です。入力が完了するまで当該シーンがリピートされます。' },
+  mistake: { number: 2, title: '間違えても続ける', text: '間違えても、そのまま正しい文字が打てるまで続けてください。誤答状況によりスロー再生や日本語音声（対応動画のみ）のヒントが流れます。' },
+  reason: { number: 3, title: '誤答の理由を記録', text: '復習時の再挑戦や単語帳作成に利用するため、誤答理由を記録します。キータッチのミスなど、復習に不要なノイズを減らせます。' },
+  dictionary: { number: 4, title: '辞書で意味を確認', text: '単語を入力し終わると辞書ウィンドウに意味が表示されます。分からなかった語の意味をその場で確認できます。確認したら入力を続けてください。' },
+  complete: { number: 5, title: '説明は以上です', text: '説明は以上です。挑戦が終わったら、メニュー画面の「学習履歴」から復習や単語帳出力（CSV・Anki）も試してみてください。' },
 };
 
 function viewport(): Rect {
@@ -33,8 +40,8 @@ function rectFor(element: HTMLElement | null, bounds: Rect): Rect | null {
   return right > left && bottom > top ? { left, top, width: right - left, height: bottom - top } : null;
 }
 
-/** Choose an area outside the spotlight. On short screens only the copy
- * scrolls; the skip action stays in the card's visible footer. */
+/** Choose an area outside the spotlight. On short screens the copy scrolls
+ * while the compact close action stays at the top of the card. */
 function cardPosition(spot: Rect, bounds: Rect, desiredHeight: number): Rect | null {
   const left = bounds.left + MARGIN;
   const top = bounds.top + MARGIN;
@@ -67,7 +74,7 @@ function sameRect(a: Rect | null, b: Rect | null) {
 
 /** A nonmodal tour. The mask does not receive clicks or focus; the original
  * typing surface stays interactive and keeps its normal keyboard behavior. */
-export function PracticeTutorial({ step, onSkip }: Props) {
+export function PracticeTutorial({ step, onSkip, onNext, reasonNeedsMeaning = false }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null);
   const copyRef = useRef<HTMLDivElement>(null);
   const skipRef = useRef(onSkip);
@@ -93,21 +100,21 @@ export function PracticeTutorial({ step, onSkip }: Props) {
       if (raisedPanel) raisedPanel.style.zIndex = originalZIndex;
       raisedPanel = null;
     };
-    const selector = step === 'replay' || step === 'play'
-      ? `[data-panel-kind="controls"] button[data-action="${step}"]` : '[data-panel-kind="typing"]';
+    const selector = step === 'complete' ? null : step === 'play' ? '.normalPlayerWindow'
+      : step === 'dictionary' || (step === 'reason' && reasonNeedsMeaning) ? '[data-panel-kind="hint"]' : '[data-panel-kind="typing"]';
     const update = () => {
       if (disposed) return;
-      const nextTarget = document.querySelector<HTMLElement>(selector);
+      const nextTarget = selector ? document.querySelector<HTMLElement>(selector) : null;
       if (nextTarget !== target) {
         restorePanel(); target = nextTarget;
         raisedPanel = target?.closest<HTMLElement>('[data-panel-kind]') ?? null;
         if (raisedPanel) { originalZIndex = raisedPanel.style.zIndex; raisedPanel.style.zIndex = '2147483646'; }
       }
       const bounds = viewport();
-      const desiredHeight = Math.max(150, (copyRef.current?.scrollHeight ?? 100) + 80);
+      const desiredHeight = Math.max(92, (copyRef.current?.scrollHeight ?? 90) + 28 + (step === 'dictionary' ? 40 : 0));
       let spot = rectFor(target, bounds);
       let card = spot ? cardPosition(spot, bounds, desiredHeight) : null;
-      if (spot && !card && step !== 'replay') {
+      if (spot && !card && ['type', 'mistake', 'reason'].includes(step)) {
         // A maximized panel has no outside space: focus its actual keyboard,
         // which keeps the guide separate from the user's input surface.
         const keyboard = target?.querySelector<HTMLElement>('[tabindex="0"]') ?? null;
@@ -119,7 +126,13 @@ export function PracticeTutorial({ step, onSkip }: Props) {
         card = { left: bounds.left + MARGIN, top: bounds.top + MARGIN,
           width: Math.max(1, Math.min(CARD_WIDTH, bounds.width - MARGIN * 2)),
           height: Math.max(1, Math.min(desiredHeight, bounds.height - MARGIN * 2)) };
-        if (!spot || (step !== 'replay' && !cardPosition(spot, bounds, 82))) spot = null;
+        if (!spot || (step !== 'play' && !cardPosition(spot, bounds, 82))) spot = null;
+      }
+      if (step === 'complete') {
+        const width = Math.max(1, Math.min(CARD_WIDTH, bounds.width - MARGIN * 2));
+        const height = Math.max(1, Math.min(desiredHeight, bounds.height - MARGIN * 2));
+        spot = null;
+        card = { left: bounds.left + (bounds.width - width) / 2, top: bounds.top + (bounds.height - height) / 2, width, height };
       }
       const next = { spot, card };
       setLayout(previous => previous && sameRect(previous.spot, next.spot) && sameRect(previous.card, next.card) ? previous : next);
@@ -129,14 +142,15 @@ export function PracticeTutorial({ step, onSkip }: Props) {
     // mobile visual-viewport changes and targets mounted after video loading.
     update();
     return () => { disposed = true; window.cancelAnimationFrame(frame); restorePanel(); };
-  }, [step]);
+  }, [step, reasonNeedsMeaning]);
 
   if (typeof document === 'undefined' || !document.body) return null;
   const copy = COPY[step];
-  const spot = layout?.spot;
+  const spot = step === 'complete' ? null : layout?.spot;
+  const showCopy = step === 'complete' || Boolean(spot);
   const bounds = viewport();
   const card = layout?.card ?? { left: bounds.left + MARGIN, top: bounds.top + MARGIN,
-    width: Math.min(CARD_WIDTH, bounds.width - MARGIN * 2), height: Math.min(190, bounds.height - MARGIN * 2) };
+    width: Math.min(CARD_WIDTH, bounds.width - MARGIN * 2), height: Math.min(148, bounds.height - MARGIN * 2) };
   return createPortal(
     <div data-practice-tutorial={step} style={{ position: 'fixed', inset: 0, zIndex: 2147483647, pointerEvents: 'none' }}>
       {spot ? <div data-tutorial-spotlight={step} aria-hidden="true" style={{
@@ -145,17 +159,24 @@ export function PracticeTutorial({ step, onSkip }: Props) {
       }} /> : <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(0, 0, 0, 0.74)', pointerEvents: 'none' }} />}
       <div className="normalTutorial" role="dialog" aria-label="操作チュートリアル" aria-modal="false" aria-describedby={descriptionId}
         style={{ position: 'fixed', left: card.left, top: card.top, width: card.width, maxHeight: card.height,
-          display: 'flex', flexDirection: 'column', gap: 12, boxSizing: 'border-box', padding: 16,
+          display: 'flex', flexDirection: 'column', boxSizing: 'border-box', padding: '14px 16px',
           border: '1px solid #709588', borderRadius: 14, background: '#162229', color: '#edf2ef',
           font: '14px/1.5 system-ui, sans-serif', boxShadow: '0 14px 46px rgba(0,0,0,0.5)', pointerEvents: 'auto' }}>
         <div ref={copyRef} aria-live="polite" aria-atomic="true" style={{ minHeight: 0, overflowY: 'auto', flex: '1 1 auto' }}>
-          <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 700, color: '#a8d5c2' }}>{copy.number} / 3</p>
-          <h2 style={{ margin: '0 0 8px', fontSize: 18, lineHeight: 1.3 }}>{spot ? copy.title : '操作欄を準備しています…'}</h2>
-          <p id={descriptionId} style={{ margin: 0 }}>{spot ? copy.text : '操作欄が表示されると案内が続きます。今すぐ自由に練習することもできます。'}</p>
+          {copy.number !== null && <p style={{ margin: '0 0 4px', paddingRight: 20, fontSize: 12, fontWeight: 700, color: '#a8d5c2' }}>{copy.number} / 5</p>}
+          <h2 style={{ margin: '0 0 8px', paddingRight: 20, fontSize: 18, lineHeight: 1.3 }}>{showCopy ? copy.title : step === 'play' ? '動画を準備しています…' : '操作欄を準備しています…'}</h2>
+          <p id={descriptionId} style={{ margin: 0 }}>{showCopy ? copy.text + (step === 'reason' && reasonNeedsMeaning ? ' 「知らなかった」場合は、辞書で当てはまる意味を選んで記録します。' : '') : '操作欄が表示されると案内が続きます。'}</p>
         </div>
-        <button type="button" onClick={() => skipRef.current()} style={{ flexShrink: 0, alignSelf: 'flex-start',
-          padding: '7px 12px', minHeight: 36, border: '1px solid #a9b7b2', borderRadius: 7, background: 'transparent',
-          color: 'inherit', font: 'inherit', cursor: 'pointer' }}>スキップ</button>
+        {step === 'dictionary' && <button type="button" onClick={onNext} disabled={!onNext || !spot} style={{
+          flexShrink: 0, alignSelf: 'flex-start', marginTop: 10, minHeight: 30, padding: '4px 10px',
+          border: '1px solid #709588', borderRadius: 5, background: 'rgba(216,239,229,0.08)', color: 'inherit',
+          font: '13px/1.5 system-ui, sans-serif', cursor: onNext && spot ? 'pointer' : 'default',
+        }}>確認しました</button>}
+        <button type="button" aria-label="操作案内を閉じる" onClick={() => skipRef.current()} style={{
+          position: 'absolute', top: 7, right: 7, width: 28, height: 28, display: 'grid', placeItems: 'center',
+          padding: 0, border: 0, borderRadius: 5, background: 'transparent', color: '#b8ccc2',
+          font: '22px/1 system-ui, sans-serif', cursor: 'pointer',
+        }}><span aria-hidden="true">×</span></button>
       </div>
     </div>, document.body,
   );

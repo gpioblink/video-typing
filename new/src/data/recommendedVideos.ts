@@ -16,11 +16,13 @@ export interface RecommendedVideo {
     /** Seconds added to the published subtitle times for this exact upload. */
     offsetSeconds: number;
   };
+  /** Optional licensed Japanese display track; typing still uses English. */
+  displaySubtitle?: RecommendedVideo['subtitle'] & { language: 'ja' };
   clips: Array<{ id: string; title: string; start: number; end: number }>;
 }
 
 // The videos play only in the official YouTube iframe. Only the CC BY 3.0
-// English subtitle files are hosted here; provenance is in captions/LICENSE.txt.
+// English/Japanese subtitle files are hosted here; provenance is in captions/LICENSE.txt.
 // Their timing was checked against native captions on these exact uploads.
 export const RECOMMENDED_VIDEOS: RecommendedVideo[] = [
   {
@@ -40,6 +42,15 @@ export const RECOMMENDED_VIDEOS: RecommendedVideo[] = [
       licenseUrl: 'https://creativecommons.org/licenses/by/3.0/',
       offsetSeconds: 0,
     },
+    displaySubtitle: {
+      url: './captions/sintel-ja.srt',
+      format: 'srt',
+      language: 'ja',
+      sourceUrl: 'https://download.blender.org/durian/subs/sintel_jp.srt',
+      license: 'CC BY 3.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/3.0/',
+      offsetSeconds: 0,
+    },
     clips: [{ id: 'sintel-gatekeepers', title: '旅の目的を話す（49秒）', start: 107, end: 156 }],
   },
   {
@@ -55,6 +66,15 @@ export const RECOMMENDED_VIDEOS: RecommendedVideo[] = [
       url: './captions/tears-of-steel-en.srt',
       format: 'srt',
       sourceUrl: 'https://download.blender.org/demo/movies/ToS/subtitles/TOS-en.srt',
+      license: 'CC BY 3.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/3.0/',
+      offsetSeconds: 0,
+    },
+    displaySubtitle: {
+      url: './captions/tears-of-steel-ja.srt',
+      format: 'srt',
+      language: 'ja',
+      sourceUrl: 'https://download.blender.org/demo/movies/ToS/subtitles/TOS-JP.srt',
       license: 'CC BY 3.0',
       licenseUrl: 'https://creativecommons.org/licenses/by/3.0/',
       offsetSeconds: 0,

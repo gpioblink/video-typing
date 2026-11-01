@@ -15,10 +15,10 @@ function rectangles(layout) {
 
 for (const [width, height] of [[1280, 720], [1366, 768], [1920, 1080], [1024, 600], [800, 600], [390, 844], [390, 720], [390, 600]]) {
   for (const mode of ['mini', 'fullscreen']) {
-    test(`${mode} ${width}×${height} places every panel within the viewport without initial overlap`, () => {
+    test(`${mode} ${width}×${height} keeps four centred learning panels within the viewport without overlap`, () => {
       const layout = calculatePracticeLayout(width, height, mode);
       const panels = rectangles(layout);
-      assert.deepEqual(panels.map(panel => panel.kind).sort(), ['config', 'controls', 'hint', 'subtitle', 'typing']);
+      assert.deepEqual(panels.map(panel => panel.kind).sort(), ['config', 'hint', 'subtitle', 'typing']);
       for (const rect of panels) {
         assert.ok(inside(rect, width, height), `${rect.kind} is outside the viewport: ${JSON.stringify(rect)}`);
         assert.ok(rect.y >= 72, `${rect.kind} covers the page header`);
@@ -27,10 +27,21 @@ for (const [width, height] of [[1280, 720], [1366, 768], [1920, 1080], [1024, 60
       for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) {
         assert.equal(overlaps(panels[i], panels[j]), false, `${panels[i].kind} overlaps ${panels[j].kind}`);
       }
+      const typing = layout.panels.typing;
+      const subtitle = layout.panels.subtitle;
+      assert.equal(typing.position.x + typing.size.width / 2, width / 2);
+      assert.equal(subtitle.position.x + subtitle.size.width / 2, width / 2);
+      assert.ok(typing.position.y - subtitle.position.y - subtitle.size.height >= 2);
+      assert.ok(typing.position.y - subtitle.position.y - subtitle.size.height <= 12);
+      assert.ok(subtitle.size.width >= 200, 'caption column remains readable');
+      assert.ok(subtitle.size.height >= 140 && subtitle.size.height <= 160);
       assert.ok(inside(layout.player, width, height));
       assert.ok(layout.player.width >= 200 && layout.player.height >= 200, 'official player has at least a 200×200 viewport');
-      if (mode === 'mini') for (const rect of panels) assert.equal(overlaps(rect, layout.player), false, `${rect.kind} covers the mini player`);
-      else {
+      if (mode === 'mini') {
+        for (const kind of ['typing', 'subtitle']) assert.equal(overlaps(panels.find(panel => panel.kind === kind), layout.player), false, `${kind} covers the mini player`);
+        const nativeControls = { ...layout.player, y: layout.player.y + layout.player.height - 80, height: 80 };
+        for (const rect of panels) assert.equal(overlaps(rect, nativeControls), false, `${rect.kind} covers native player controls`);
+      } else {
         assert.equal(layout.player.y, 72);
         assert.equal(layout.player.width, width);
         assert.equal(layout.player.height, height - 72);
@@ -40,22 +51,31 @@ for (const [width, height] of [[1280, 720], [1366, 768], [1920, 1080], [1024, 60
   }
 }
 
-test('compact portrait keeps controls usable and folds auxiliary panels without horizontal overflow', () => {
+for (const [width, height] of [[1280, 720], [1366, 768], [1920, 1080]]) {
+  for (const mode of ['mini', 'fullscreen']) test(`${mode} desktop ${width}×${height} aligns half-width subtitles immediately above centred typing`, () => {
+    const layout = calculatePracticeLayout(width, height, mode);
+    assert.equal(layout.panels.subtitle.size.width, layout.panels.typing.size.width / 2);
+    assert.equal(layout.panels.typing.position.x + layout.panels.typing.size.width / 2, width / 2);
+    assert.equal(layout.panels.subtitle.position.x + layout.panels.subtitle.size.width / 2, width / 2);
+    assert.equal(layout.panels.subtitle.position.y + layout.panels.subtitle.size.height + 12, layout.panels.typing.position.y);
+    assert.deepEqual(layout.panels.config.position, { x: 16, y: 72 });
+    assert.equal(layout.panels.config.defaultMinimized, true);
+    assert.equal(layout.panels.hint.position.x + layout.panels.hint.size.width, width - 16);
+    assert.equal(layout.panels.hint.position.y, 72);
+    assert.equal(layout.panels.hint.position.y + layout.panels.hint.size.height, height - 16 - (mode === 'fullscreen' ? 80 : 0));
+  });
+}
+
+test('compact portrait preserves readable centred captions and folds auxiliary headers', () => {
   const layout = calculatePracticeLayout(390, 844, 'mini');
-  assert.equal(layout.panels.controls.defaultMinimized, false);
-  assert.equal(layout.panels.controls.size.height, 160);
+  assert.equal(layout.panels.controls, undefined);
   assert.equal(layout.panels.config.defaultMinimized, true);
   assert.equal(layout.panels.hint.defaultMinimized, true);
   assert.equal(layout.panels.config.position.y, layout.panels.hint.position.y);
+  assert.equal(layout.player.height, 200);
   assert.ok(layout.panels.typing.size.height >= 160);
-  assert.ok(layout.panels.subtitle.size.height >= 96);
-  assert.ok(layout.player.y < layout.panels.controls.position.y);
-  assert.ok(layout.panels.controls.position.y < layout.panels.typing.position.y);
-  assert.ok(layout.panels.typing.position.y < layout.panels.subtitle.position.y);
-});
-
-test('desktop mini controls have room for playback and the additional web controls', () => {
-  assert.equal(calculatePracticeLayout(1280, 720, 'mini').panels.controls.size.height, 210);
+  assert.equal(layout.panels.subtitle.size.width, 200);
+  assert.equal(layout.panels.subtitle.size.height, 160);
 });
 
 test('generic panel clamping fixes fresh offscreen defaults and honours an explicit minimum', () => {

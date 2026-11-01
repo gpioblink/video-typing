@@ -25,6 +25,7 @@ interface Props {
   sendCompleted: () => void;
   requestExplanation: (query: string, options?: ExplanationRequestOptions) => Promise<void>;
   onMistakeInput?: () => void;
+  onMistakeWordCompleted?: (query: string) => void;
   onMistakeReasonPromptOpen?: () => void;
   onMistakeReasonPromptClose?: () => void;
   onFrameInteracted: () => void;
@@ -294,6 +295,7 @@ export function Window({
   sendCompleted,
   requestExplanation,
   onMistakeInput,
+  onMistakeWordCompleted,
   onMistakeReasonPromptOpen,
   onMistakeReasonPromptClose,
   onFrameInteracted,
@@ -811,6 +813,7 @@ export function Window({
                 selectionPhase: 'reason',
               });
               onMistakeReasonPromptOpen?.();
+              onMistakeWordCompleted?.(wordInfo.query);
             } else if (
               wordInfo &&
               wordKey &&

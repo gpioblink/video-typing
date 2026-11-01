@@ -6,24 +6,23 @@ import { RECOMMENDED_VIDEOS } from '../src/data/recommendedVideos';
 // Opt-in live service test. No transcript service or replacement player.
 for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} normal learning UI`, async ({ page }) => {
   await page.goto('/');
+  await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
   await page.getByRole('button', { name: new RegExp(video.title) }).click();
-  const controls = page.getByRole('region', { name: 'Controls', exact: true });
   const typing = page.getByRole('region', { name: 'Typing', exact: true });
-  const subtitle = page.getByRole('region', { name: 'Subtitle', exact: true }).locator('div').last();
+  const subtitle = page.getByRole('region', { name: 'Subtitle', exact: true }).locator('[data-subtitle-text]');
   await expect(typing).toBeVisible({ timeout: 20_000 });
   const frame = page.frames().find(item => item.url().includes('youtube.com/embed/'))!;
   expect(frame).toBeDefined();
-  await page.waitForTimeout(6000);
-  const nativePlay = frame.getByRole('button', { name: 'Play video', exact: true });
-  if (await nativePlay.isVisible()) await nativePlay.click();
+  await expect(page.getByRole('region', { name: 'Controls', exact: true })).toHaveCount(0);
   const state = () => frame.evaluate(() => (document.getElementById('movie_player') as any).getPlayerState());
   await expect.poll(state, { timeout: 20_000 }).toBe(1);
-  await controls.getByRole('button', { name: '一時停止', exact: true }).click();
+  await frame.evaluate(() => (document.getElementById('movie_player') as any).pauseVideo());
   await expect.poll(state).toBe(2);
   const paused = await frame.evaluate(() => document.querySelector('video')!.currentTime);
   await page.waitForTimeout(500);
   expect(Math.abs(await frame.evaluate(() => document.querySelector('video')!.currentTime) - paused)).toBeLessThan(0.2);
-  await controls.getByRole('button', { name: '再生する', exact: true }).click();
+  await frame.evaluate(() => (document.getElementById('movie_player') as any).playVideo());
+  await page.getByRole('region', { name: 'Subtitle', exact: true }).getByRole('button', { name: '英語（答え）', exact: true }).click();
   await expect.poll(state).toBe(1);
   const text = readFileSync(resolve('public', video.subtitle.url), 'utf8');
   const seconds = (time: string) => { const [h, m, s] = time.trim().replace(',', '.').split(':').map(Number); return h * 3600 + m * 60 + s; };
@@ -40,7 +39,7 @@ for (const video of RECOMMENDED_VIDEOS) test(`real official YouTube ${video.id} 
     await keyboard.pressSequentially(letters, { delay: 15 });
     await expect(keyboard.locator('.finished')).toHaveCount(letters.length);
     if (cueIndex++ === 0) {
-      await controls.getByRole('button', { name: '聞き直す', exact: true }).click();
+      await frame.evaluate(time => (document.getElementById('movie_player') as any).seekTo(time, true), Math.max(start, range.start));
       await expect.poll(state).toBe(1);
     }
   }

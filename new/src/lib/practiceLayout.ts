@@ -48,83 +48,62 @@ export function clampPanelGeometry(
   };
 }
 
-/** Initial practice positions use viewport coordinates, as do DraggablePanel
- * and the fixed player. Fullscreen reserves the player's bottom 80px controls. */
+/** Four learning panels share a viewport-centred work area. The right hint
+ * column limits its symmetric width instead of moving typing off-centre. */
 export function calculatePracticeLayout(width: number, height: number, mode: PracticeDisplayMode): PracticeLayout {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error('Viewport dimensions must be positive finite numbers.');
   const w = Math.floor(width), h = Math.floor(height);
   const fullscreen = mode === 'fullscreen';
   const margin = Math.min(16, Math.max(0, (w - 200) / 2));
+  const center = w / 2;
   const bottom = h - FOOTER - (fullscreen ? 80 : 0);
-  const usable = bottom - HEADER;
-  const innerWidth = w - margin * 2;
+  const hintExpanded = w >= 960;
+  const hintWidth = hintExpanded
+    ? bound(Math.floor(w * 0.28), 240, 350)
+    : Math.min(216, (w - margin * 2 - GAP) / 2);
+  const hintLeft = w - margin - hintWidth;
+  const symmetricWidth = hintExpanded
+    ? 2 * (hintLeft - GAP - center)
+    : w - margin * 2;
+  const typingWidth = Math.max(1, Math.min(760, symmetricWidth));
+  const captionWidth = Math.min(typingWidth, Math.max(200, typingWidth / 2));
+  const configWidth = Math.min(216, hintExpanded ? typingWidth : hintWidth);
   const panels: PracticeLayout['panels'] = {};
-  const panel = (kind: PanelKind, x: number, y: number, panelWidth: number, panelHeight: number, minHeight: number, minimized = false) => {
+  const panel = (kind: PanelKind, x: number, y: number, panelWidth: number, panelHeight: number, minimumHeight: number, minimized = false) => {
     panels[kind] = {
       position: { x, y }, size: { width: panelWidth, height: panelHeight },
-      minimumSize: { width: Math.min(240, panelWidth), height: minHeight },
+      minimumSize: { width: Math.min(200, panelWidth), height: minimumHeight },
       defaultMinimized: minimized,
     };
   };
+  panel('config', margin, HEADER, configWidth, Math.min(400, h - HEADER - FOOTER), 160, true);
+  panel('hint', hintLeft, HEADER, hintWidth, hintExpanded ? bottom - HEADER : 200, 160, !hintExpanded);
+
+  let gap = GAP;
+  let captionHeight = 160;
+  let typingHeight: number;
   let player = { x: 0, y: HEADER, width: w, height: Math.max(200, h - HEADER) };
-  const columns = w >= 640 && usable >= (fullscreen ? 364 : 480);
-  if (columns) {
-    const rightWidth = bound(Math.floor(w * 0.28), 240, 350);
-    const leftWidth = innerWidth - rightWidth - 16;
-    const rightX = w - margin - rightWidth;
-    const controlsHeight = Math.min(w >= 960 ? 210 : 160, usable - 40 - 160 - GAP * 2);
-    const hintHeight = Math.min(fullscreen ? 240 : 400, usable - controlsHeight - 40 - GAP * 2);
-    const rightHeight = controlsHeight + COLLAPSED_HEIGHT + hintHeight + GAP * 2;
-    const rightTop = fullscreen ? bottom - rightHeight : HEADER;
-    panel('controls', rightX, rightTop, rightWidth, controlsHeight, 140);
-    panel('config', rightX, rightTop + controlsHeight + GAP, rightWidth, Math.min(400, usable), 160, true);
-    panel('hint', rightX, rightTop + controlsHeight + GAP * 2 + COLLAPSED_HEIGHT, rightWidth, hintHeight, 160);
-    if (!fullscreen) {
-      const playerHeight = bound(Math.min(usable - 160 - 96 - GAP * 2, leftWidth * 9 / 16), 200, 360);
-      const playerWidth = Math.min(leftWidth, playerHeight * 16 / 9);
-      player = { x: margin + (leftWidth - playerWidth) / 2, y: HEADER, width: playerWidth, height: playerHeight };
-      const remaining = usable - playerHeight - GAP * 2;
-      const typingHeight = Math.min(260, remaining - 96);
-      const subtitleHeight = Math.min(180, remaining - typingHeight);
-      panel('typing', margin, HEADER + playerHeight + GAP, leftWidth, typingHeight, 160);
-      panel('subtitle', margin, HEADER + playerHeight + GAP * 2 + typingHeight, leftWidth, subtitleHeight, 96);
-    } else {
-      const subtitleHeight = Math.min(160, Math.max(96, usable - 260 - GAP));
-      const typingHeight = Math.min(260, usable - subtitleHeight - GAP);
-      panel('typing', margin, bottom - subtitleHeight - GAP - typingHeight, leftWidth, typingHeight, 160);
-      panel('subtitle', margin, bottom - subtitleHeight, leftWidth, subtitleHeight, 96);
-    }
+  if (fullscreen) {
+    // Narrow screens put the two auxiliary headers above the centred captions.
+    const workTop = HEADER + (hintExpanded ? 0 : COLLAPSED_HEIGHT + GAP);
+    typingHeight = Math.min(260, Math.max(160, bottom - workTop - captionHeight - gap));
   } else {
-    // A single main column keeps narrow screens usable. Config and Hint share
-    // a row of collapsed headers; their expanded sizes remain intact.
-    let gap = GAP;
-    let controlsHeight = 160, subtitleHeight = 96;
-    let controlsMinimized = false, subtitleMinimized = false, typingMinimized = false;
-    const videoHeight = fullscreen ? 0 : 200;
-    const gapCount = fullscreen ? 3 : 4;
-    const required = () => videoHeight + (controlsMinimized ? 40 : controlsHeight) + 40
-      + (typingMinimized ? 40 : 160) + (subtitleMinimized ? 40 : subtitleHeight) + gapCount * gap;
-    if (required() > usable) controlsHeight = 140;
-    if (required() > usable) controlsMinimized = true;
-    if (required() > usable) subtitleMinimized = true;
-    if (required() > usable) gap = Math.max(4, Math.floor((usable - required() + gapCount * gap) / gapCount));
-    if (required() > usable) typingMinimized = true;
-    const extra = Math.max(0, usable - required());
-    const typingHeight = typingMinimized ? 160 : Math.min(260, 160 + extra);
-    let y = fullscreen ? bottom - required() - (typingMinimized ? 0 : typingHeight - 160) : HEADER;
-    if (!fullscreen) {
-      player = { x: margin, y, width: innerWidth, height: 200 };
-      y += 200 + gap;
+    let playerTop = HEADER + (hintExpanded ? 0 : COLLAPSED_HEIGHT + GAP);
+    // On short viewports auxiliary headers may share the player's upper corners.
+    // The native player's bottom control strip always remains uncovered.
+    if (bottom - playerTop < 200 + 160 + captionHeight + gap * 2) playerTop = HEADER;
+    if (bottom - playerTop < 200 + 160 + captionHeight + gap * 2) captionHeight = 140;
+    if (bottom - playerTop < 200 + 160 + captionHeight + gap * 2) {
+      gap = Math.max(2, Math.min(GAP, (bottom - playerTop - 200 - 160 - captionHeight) / 2));
     }
-    panel('controls', margin, y, innerWidth, controlsHeight, 140, controlsMinimized);
-    y += (controlsMinimized ? 40 : controlsHeight) + gap;
-    const auxiliaryWidth = (innerWidth - gap) / 2;
-    panel('config', margin, y, auxiliaryWidth, Math.min(400, Math.max(160, usable)), 160, true);
-    panel('hint', margin + auxiliaryWidth + gap, y, auxiliaryWidth, 200, 160, true);
-    y += 40 + gap;
-    panel('typing', margin, y, innerWidth, typingHeight, 160, typingMinimized);
-    y += (typingMinimized ? 40 : typingHeight) + gap;
-    panel('subtitle', margin, y, innerWidth, subtitleHeight, 96, subtitleMinimized);
+    typingHeight = Math.min(260, Math.max(160, bottom - playerTop - 200 - captionHeight - gap * 2));
+    const captionTop = bottom - typingHeight - gap - captionHeight;
+    const playerHeight = Math.max(200, Math.min(hintExpanded ? 360 : 200, captionTop - gap - playerTop, symmetricWidth * 9 / 16));
+    const playerWidth = Math.min(640, symmetricWidth, playerHeight * 16 / 9);
+    player = { x: center - playerWidth / 2, y: playerTop, width: playerWidth, height: playerHeight };
   }
+  const typingTop = bottom - typingHeight;
+  panel('typing', center - typingWidth / 2, typingTop, typingWidth, typingHeight, 160);
+  panel('subtitle', center - captionWidth / 2, typingTop - gap - captionHeight, captionWidth, captionHeight, 140);
   return { player, panels };
 }

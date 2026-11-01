@@ -64,7 +64,7 @@ export interface DictionaryEntry {
   importedAt: number;
 }
 
-export type PanelKind = 'typing' | 'hint' | 'config' | 'debug' | 'subtitle' | 'controls';
+export type PanelKind = 'typing' | 'hint' | 'config' | 'debug' | 'subtitle';
 
 export interface PanelPosition {
   x: number;

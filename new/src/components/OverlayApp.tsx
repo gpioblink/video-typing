@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfigPanel } from './ConfigPanel';
 import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
+import { findDisplaySubtitleCue } from '../lib/displaySubtitles';
+import type { PracticeTutorialEvent } from '../lib/practiceTutorial';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
@@ -59,8 +61,9 @@ interface Props {
   }>>;
   panelStorageScope?: string;
   layoutRevision?: number;
-  controlsExtra?: React.ReactNode;
   onTypingProgressChange?: (progress: StoredTypingProgressData) => void;
+  onTutorialEvent?: (event: PracticeTutorialEvent) => void;
+  onReasonMeaningSelectionChange?: (active: boolean) => void;
   onReplay?: () => void;
   showClipResult?: boolean;
   typeReviewMode?: boolean;
@@ -104,8 +107,9 @@ function OverlaySession({
   panelDefaults,
   panelStorageScope,
   layoutRevision,
-  controlsExtra,
   onTypingProgressChange,
+  onTutorialEvent,
+  onReasonMeaningSelectionChange,
   onReplay,
   showClipResult = false,
   typeReviewMode = false,
@@ -144,8 +148,9 @@ function OverlaySession({
   });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [subtitlesVisible, setSubtitlesVisible] = useState(true);
+  const [subtitleLanguage, setSubtitleLanguage] = useState<'native' | 'answer'>(() => displaySubtitleCues?.length ? 'native' : 'answer');
+  useEffect(() => { setSubtitleLanguage(nativeSubtitleState.cues?.length ? 'native' : 'answer'); }, [nativeSubtitleState.cues]);
   const [clipComplete, setClipComplete] = useState(false);
   const clipCompleteRef = useRef(false);
   const allProgressRef = useRef(typingProgress);
@@ -176,6 +181,13 @@ function OverlaySession({
   } | null>(null);
   const shouldResumeAfterMistakeReasonRef = useRef(false);
   const unknownHintSelectionHandlerRef = useRef<((word: DictionaryWord) => void) | null>(null);
+  const handleMeaningSelectionChange = useCallback((active: boolean) => {
+    setIsUnknownHintSelectionActive(active);
+    onReasonMeaningSelectionChange?.(active);
+  }, [onReasonMeaningSelectionChange]);
+  const handleMeaningSelectionHandler = useCallback((handler: ((word: DictionaryWord) => void) | null) => {
+    unknownHintSelectionHandlerRef.current = handler;
+  }, []);
   const praiseTimerRef = useRef<number | null>(null);
 
   const cache = useMemo(() => {
@@ -352,16 +364,10 @@ function OverlaySession({
     return activeCue ? findCueIndex(subtitleCues, activeCue) : -1;
   }, [activeCue, subtitleCues]);
 
-  const displayCue = useMemo(() => {
-    const displaySubtitleCues = nativeSubtitleState.cues;
-
-    if (!activeCue || !displaySubtitleCues?.length) {
-      return activeCue;
-    }
-
-    const cueTime = (activeCue.start + activeCue.end) / 2;
-    return displaySubtitleCues.find((cue) => cue.start <= cueTime && cueTime < cue.end) || activeCue;
-  }, [activeCue, nativeSubtitleState.cues]);
+  const displayCue = useMemo(
+    () => findDisplaySubtitleCue(activeCue, nativeSubtitleState.cues),
+    [activeCue, nativeSubtitleState.cues],
+  );
 
   const isTypingCueActive = useMemo(() => {
     if (!activeCue) {
@@ -468,7 +474,6 @@ function OverlaySession({
         releaseLoop();
       },
       onSample: (snapshot, event) => {
-        setIsPlaying(!video.paused);
         if (event === 'loadedmetadata') setIsVideoAvailable(true);
         if (showClipResult && playbackRange && snapshot.currentTime >= playbackRange.end && !clipCompleteRef.current) {
           const frames = typingFrames || subtitleCues.map(cue => ({ ...subtitleCueToCaptionFrame(cue), start: cue.start, end: cue.end }));
@@ -494,7 +499,8 @@ function OverlaySession({
           // Seek through the observer so this internal loop is not mistaken
           // for a user's seek to another sentence.
           timelineObserverRef.current?.seek(loopRange.start);
-          if (event === 'ended') void video.play().catch(() => undefined);
+          if (!video.paused) onReplay?.();
+          if (event === 'ended') void video.play().then(() => { if (!video.paused) onReplay?.(); }).catch(() => undefined);
           return;
         }
         currentTimeRef.current = snapshot.currentTime;
@@ -507,7 +513,7 @@ function OverlaySession({
       observer.dispose();
       timelineObserverRef.current = null;
     };
-  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId, playbackRange, showClipResult, subtitleCues, typingFrames]);
+  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId, playbackRange, showClipResult, subtitleCues, typingFrames, onReplay]);
 
   useEffect(() => () => {
     nativeReplayGenerationRef.current += 1;
@@ -642,6 +648,7 @@ function OverlaySession({
   }, [activeFrame.id, pageUrl]);
 
   const handleFrameInteracted = useCallback(() => {
+    onTutorialEvent?.({ type: 'input' });
     setTypingProgress((state) => {
       const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
       const nextFrameProgress = {
@@ -660,13 +667,14 @@ function OverlaySession({
       void saveStoredTypingProgress(pageUrl, activeFrame.id, nextFrameProgress);
       return next;
     });
-  }, [activeFrame.id, pageUrl]);
+  }, [activeFrame.id, pageUrl, onTutorialEvent]);
 
   const handleMistakeInput = useCallback(() => {
     if (!activeCue) {
       return;
     }
 
+    onTutorialEvent?.({ type: 'mistake' });
     const nextCount = (mistakeCountsRef.current[activeFrame.id] || 0) + 1;
     mistakeCountsRef.current = {
       ...mistakeCountsRef.current,
@@ -682,6 +690,7 @@ function OverlaySession({
     applyMistakeSensitivePlaybackRate,
     config,
     onNativeCueReplay,
+    onTutorialEvent,
     trackNativeReplay,
   ]);
 
@@ -767,6 +776,13 @@ function OverlaySession({
       }
     };
   }, []);
+
+  const recordedTagIds = useRef(new Set(Object.values(initialTypingProgress).flatMap(frame => frame.tags.map(tag => tag.id))));
+  useEffect(() => {
+    const tags = Object.values(typingProgress).flatMap(frame => frame.tags);
+    if (tags.some(tag => !recordedTagIds.current.has(tag.id))) onTutorialEvent?.({ type: 'reason-recorded' });
+    for (const tag of tags) recordedTagIds.current.add(tag.id);
+  }, [typingProgress, onTutorialEvent]);
 
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
@@ -961,6 +977,7 @@ function OverlaySession({
         });
         return merged;
       });
+      if (nextWords.length) onTutorialEvent?.({ type: 'dictionary-shown', frameId: requestedFrameId, query });
     };
     const trackSearch = (search: Promise<void>) => {
       setPendingHintSearchCount((count) => {
@@ -1058,7 +1075,7 @@ function OverlaySession({
         content: 'Dictionary search failed.',
       }]);
     }));
-  }, [activeCue?.text, activeFrame.id, typingFrames?.length]);
+  }, [activeCue?.text, activeFrame.id, typingFrames?.length, onTutorialEvent]);
 
   return (
     <CacheProvider value={cache}>
@@ -1068,42 +1085,6 @@ function OverlaySession({
         onKeyUp={stopOverlayKeyboardEventPropagation}
         onKeyPress={stopOverlayKeyboardEventPropagation}
       >
-        <DraggablePanel
-          kind="controls"
-          title="Controls"
-          minimizable={Boolean(panelDefaults?.controls?.defaultMinimized)}
-          defaultMinimized={panelDefaults?.controls?.defaultMinimized}
-          defaultPosition={panelDefaults?.controls?.position || { x: 24, y: 72 }}
-          defaultSize={panelDefaults?.controls?.size || { width: 380, height: 140 }}
-          storageScope={panelStorageScope}
-          layoutRevision={layoutRevision}
-          minimumSize={panelDefaults?.controls?.minimumSize || { width: 240, height: 140 }}
-        >
-          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-            {!isVideoAvailable ? <p role="status">動画を読み込めません。動画を開き直してください。</p> : null}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button type="button" data-action="play" onClick={() => {
-                const video = getVideoElement(targetId);
-                if (!video) return;
-                if (video.paused) void video.play().catch(() => undefined);
-                else video.pause();
-              }}>{isPlaying ? '一時停止' : '再生する'}</button>
-              <button type="button" data-action="replay" disabled={!activeCue} onClick={() => {
-                if (!activeCue) return;
-                seekTo(activeCue.start);
-                const video = getVideoElement(targetId);
-                if (video) void video.play().then(() => {
-                  if (!video.paused) onReplay?.();
-                }).catch(() => undefined);
-              }}>聞き直す</button>
-            </div>
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input type="checkbox" checked={subtitlesVisible} onChange={event => setSubtitlesVisible(event.target.checked)} />
-              字幕を表示
-            </label>
-            {controlsExtra}
-          </div>
-        </DraggablePanel>
         <DraggablePanel
           kind="typing"
           minimizable={Boolean(panelDefaults?.typing?.defaultMinimized)}
@@ -1124,16 +1105,15 @@ function OverlaySession({
             sendCompleted={handleFrameCompleted}
             requestExplanation={handleRequestExplanation}
             onMistakeInput={handleMistakeInput}
+            onMistakeWordCompleted={(query) => onTutorialEvent?.({ type: 'mistake-word-completed', frameId: activeFrame.id, query })}
             onMistakeReasonPromptOpen={handleMistakeReasonPromptOpen}
             onMistakeReasonPromptClose={handleMistakeReasonPromptClose}
             onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}
             hintWords={hintWords}
-            onUnknownHintSelectionActiveChange={setIsUnknownHintSelectionActive}
-            onUnknownHintSelectionHandlerChange={(handler) => {
-              unknownHintSelectionHandlerRef.current = handler;
-            }}
+            onUnknownHintSelectionActiveChange={handleMeaningSelectionChange}
+            onUnknownHintSelectionHandlerChange={handleMeaningSelectionHandler}
             onTypeReviewMistakeTagsCleared={handleTypeReviewMistakeTagsCleared}
             typeReviewMode={typeReviewMode}
           />
@@ -1144,6 +1124,7 @@ function OverlaySession({
           layoutRevision={layoutRevision}
           minimumSize={panelDefaults?.hint?.minimumSize}
           title="Hint"
+          reveal={hintWords.length > 0}
           minimizable={Boolean(panelDefaults)}
           defaultMinimized={panelDefaults?.hint?.defaultMinimized}
           defaultPosition={panelDefaults?.hint?.position || { x: 700, y: 120 }}
@@ -1167,6 +1148,7 @@ function OverlaySession({
             minimizable
             defaultMinimized
           >
+            {!subtitlesVisible && <button type="button" onClick={() => setSubtitlesVisible(true)}>字幕ウィンドウを表示</button>}
             <ConfigPanel
               config={config}
               currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
@@ -1184,7 +1166,7 @@ function OverlaySession({
             />
           </DraggablePanel>
         ) : null}
-        <DraggablePanel
+        {subtitlesVisible && <DraggablePanel
           kind="subtitle"
           minimizable={Boolean(panelDefaults?.subtitle?.defaultMinimized)}
           defaultMinimized={panelDefaults?.subtitle?.defaultMinimized}
@@ -1192,14 +1174,20 @@ function OverlaySession({
           layoutRevision={layoutRevision}
           minimumSize={panelDefaults?.subtitle?.minimumSize}
           title="Subtitle"
+          onClose={() => setSubtitlesVisible(false)}
           defaultPosition={panelDefaults?.subtitle?.position || { x: 180, y: 520 }}
           defaultSize={panelDefaults?.subtitle?.size || { width: 520, height: 180 }}
         >
           <SubtitlePanel
-            cueText={subtitlesVisible ? displayCue?.text || '' : '字幕は非表示です'}
-            fileName={nativeSubtitleState.fileName || subtitleFileName}
+            cueText={activeCue?.text || ''}
+            fileName={subtitleFileName}
+            nativeCueText={displayCue?.text}
+            nativeFileName={nativeSubtitleState.fileName}
+            hasNativeSubtitles={Boolean(nativeSubtitleState.cues?.length)}
+            language={subtitleLanguage}
+            onLanguageChange={setSubtitleLanguage}
           />
-        </DraggablePanel>
+        </DraggablePanel>}
         {clipComplete && playbackRange ? <div role="status" style={{ position: 'fixed', left: 24, bottom: 24, pointerEvents: 'auto', padding: 20, background: '#162229', color: '#ecf2f1', borderRadius: 10 }}>
           <h2>クリップ完走</h2>
           <button type="button" onClick={() => { clipCompleteRef.current = false; setClipComplete(false); setTypingProgress({}); setLoopCue(null); setActiveFrameResetRevision(revision => revision + 1); seekTo(playbackRange.start); void getVideoElement(targetId)?.play().catch(() => undefined); }}>この区間を再挑戦</button>

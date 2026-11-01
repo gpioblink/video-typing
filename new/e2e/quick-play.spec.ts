@@ -24,7 +24,7 @@ async function mockYouTube(page: Page) {
           window.testPlayer = this; window.testPlayers.push(this);
           setTimeout(() => options.events.onReady({ target: this }), 0);
         }
-        cueVideoById(data) { this.cue = data; this.time = data.startSeconds; }
+        cueVideoById(data) { this.cue = data; this.time = data.startSeconds; this.state = 5; queueMicrotask(() => this.options.events.onStateChange({ data: 5 })); }
         playVideo() {
           clearInterval(this.timer); this.state = 1;
           this.options.events.onStateChange({ data: 1 });
@@ -64,14 +64,16 @@ function captions(video: RecommendedVideo): SubtitleCue[] {
 }
 
 const panel = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
-const subtitle = (page: Page) => panel(page, 'Subtitle').locator('div').last();
+const subtitle = (page: Page) => panel(page, 'Subtitle').locator('[data-subtitle-text]');
 const keyboard = (page: Page) => panel(page, 'Typing').locator('[tabindex="0"]');
 
 async function expectNormalPanels(page: Page) {
-  for (const name of ['Typing', 'Hint', 'Config', 'Subtitle', 'Controls']) await expect(panel(page, name)).toBeVisible();
+  for (const name of ['Typing', 'Hint', 'Config', 'Subtitle']) await expect(panel(page, name)).toBeVisible();
   expect(await page.evaluate(() => typeof chrome === 'undefined' || !chrome.runtime?.id)).toBe(true);
   expect(await page.evaluate(() => typeof chrome === 'undefined' || typeof chrome.storage === 'undefined')).toBe(true);
   await expect(page.locator('iframe[title="YouTube video player"]')).toBeVisible();
+  await expect(panel(page, 'Controls')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(再生する|聞き直す|一時停止)$/ })).toHaveCount(0);
 }
 
 async function chooseVideo(page: Page, video = FIRST) {
@@ -79,11 +81,18 @@ async function chooseVideo(page: Page, video = FIRST) {
   await expect(page.getByRole('heading', { name: /クリップ選択 —/ })).toHaveCount(0);
 }
 
-async function openVideo(page: Page) {
+async function openVideo(page: Page, preserveGuide = false) {
   await expectNormalPanels(page);
+  if (preserveGuide) return;
+  const close = page.getByRole('button', { name: '操作案内を閉じる', exact: true });
+  if (await close.isVisible()) await close.click();
+  await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
 }
 
-async function moveToCue(page: Page, cue: SubtitleCue) {
+async function moveToCue(page: Page, cue: SubtitleCue, preserveGuide = false) {
+  const close = page.getByRole('button', { name: '操作案内を閉じる', exact: true });
+  if (!preserveGuide && await close.isVisible()) await close.click();
+  if (await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).getAttribute('aria-pressed') !== 'true') await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
   await page.evaluate(time => (window as any).testPlayer.seekTo(time), cue.start + Math.min(0.1, (cue.end - cue.start) / 2));
   await expect(subtitle(page)).toHaveText(cue.text);
 }
@@ -91,20 +100,16 @@ async function moveToCue(page: Page, cue: SubtitleCue) {
 async function typeCue(page: Page, cue: SubtitleCue) {
   await keyboard(page).focus();
   const letters = cue.text.replace(/[^A-Za-z]/g, '');
-  await keyboard(page).pressSequentially(letters, { delay: 12 });
+  const finished = await keyboard(page).locator('.finished').count();
+  await keyboard(page).pressSequentially(letters.slice(finished), { delay: 12 });
   await expect(keyboard(page).locator('.finished')).toHaveCount(letters.length);
 }
 
-async function completeClip(page: Page, video: RecommendedVideo, tutorial: boolean) {
+async function completeClip(page: Page, video: RecommendedVideo) {
   const cues = captions(video);
-  for (const [index, cue] of cues.entries()) {
+  for (const cue of cues) {
     await moveToCue(page, cue);
     await typeCue(page, cue);
-    if (tutorial && index === 0) {
-      await expect(page.locator('.normalTutorial')).toContainText('2 / 3');
-      await panel(page, 'Controls').getByRole('button', { name: '聞き直す', exact: true }).click();
-      await expect(page.locator('.normalTutorial')).toContainText('3 / 3');
-    }
   }
   await page.evaluate(time => (window as any).testPlayer.seekTo(time), video.clips[0].end);
   await expect(page.getByRole('heading', { name: 'クリップ完走', exact: true })).toBeVisible();
@@ -113,35 +118,39 @@ async function completeClip(page: Page, video: RecommendedVideo, tutorial: boole
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
 }
 
-test('licensed selection opens the normal overlay, completes tutorial and retries three times without an extension', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await mockYouTube(page);
-  await page.goto('/');
-  await chooseVideo(page);
-  await openVideo(page);
-  await expect(page.locator('.normalTutorial')).toContainText('1 / 3');
-  await page.getByRole('button', { name: 'スキップ', exact: true }).click();
+test('the five-stage tutorial follows a real mistake, reason and dictionary before three complete attempts', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await mockYouTube(page); await page.goto('/'); await chooseVideo(page); await openVideo(page, true);
+  await expect(page.locator('.normalTutorial')).toContainText('1 / 5');
+  await expect(page.locator('.normalTutorial')).toContainText('記号や空白');
+  await page.getByRole('button', { name: '操作案内を閉じる', exact: true }).click();
   await expect(page.locator('.normalTutorial')).toHaveCount(0);
+  await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
   await page.getByRole('button', { name: '操作案内', exact: true }).click();
-  await expect(page.locator('.normalTutorial')).toContainText('1 / 3');
-  const config = panel(page, 'Config');
-  await expect(config.getByRole('button', { name: 'Configを開く' })).toHaveAttribute('aria-expanded', 'false');
-  await config.getByRole('button', { name: 'Configを開く' }).click();
-  await expect(config.getByRole('textbox', { name: 'Cue number' })).toBeVisible();
-  const expandedHeight = (await config.boundingBox())!.height;
-  await config.getByRole('button', { name: 'Configを折りたたむ' }).click();
-  expect((await config.boundingBox())!.height).toBeLessThan(70);
-  await config.getByRole('button', { name: 'Configを開く' }).click();
-  expect((await config.boundingBox())!.height).toBeGreaterThanOrEqual(expandedHeight - 2);
-  await config.getByRole('button', { name: 'Configを折りたたむ' }).click();
-  await completeClip(page, FIRST, true);
-  await expect(page.locator('.normalResult')).toContainText('チュートリアル完了');
+  await expect(page.locator('.normalTutorial')).toContainText('1 / 5');
+  await moveToCue(page, captions(FIRST)[0], true);
+  await keyboard(page).focus(); await keyboard(page).pressSequentially('x');
+  await expect(page.locator('.normalTutorial')).toContainText('2 / 5');
+  await keyboard(page).pressSequentially('This', { delay: 30 });
+  await expect(page.locator('.normalTutorial')).toContainText('3 / 5');
+  await expect(keyboard(page)).toContainText('誤答理由を選んでください');
+  await keyboard(page).press('m');
+  await expect(page.locator('.normalTutorial')).toContainText('4 / 5');
+  await expect(panel(page, 'Hint').locator('.item').first()).toBeVisible();
+  await expect(page.locator('[data-tutorial-spotlight="dictionary"]')).toBeVisible();
+  await page.getByRole('button', { name: '確認しました', exact: true }).click();
+  await expect(page.locator('.normalTutorial')).toContainText('5 / 5');
+  await expect(page.locator('.normalTutorial')).toContainText('学習履歴');
+  await expect(page.locator('.normalTutorial')).toContainText('CSV');
+  await expect(page.locator('.normalTutorial')).toContainText('Anki');
+  await page.getByRole('button', { name: '操作案内を閉じる', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('video-typing-tutorial-v3'))).toBe('done');
+  await completeClip(page, FIRST);
   for (let retry = 0; retry < 2; retry++) {
     await page.getByRole('button', { name: 'もう一度プレイ', exact: true }).click();
     await expectNormalPanels(page);
     await expect(keyboard(page).locator('.finished')).toHaveCount(0);
-    await completeClip(page, FIRST, false);
+    await completeClip(page, FIRST);
   }
   await page.getByRole('button', { name: 'クリップ選択へ', exact: true }).click();
   expect(await page.evaluate(() => (window as any).testPlayer.destroyed)).toBe(true);
@@ -175,14 +184,14 @@ test('normal overlay keeps unfinished cues looping, preserves native pause and s
   const priorSeeks = await page.evaluate(() => (window as any).testPlayer.seeks.length);
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.seeks.length), { timeout: 8_000 }).toBeGreaterThan(priorSeeks);
   await expect(subtitle(page)).toHaveText(captions(FIRST)[0].text);
-  await panel(page, 'Controls').getByRole('button', { name: '一時停止', exact: true }).click();
+  await page.evaluate(() => (window as any).testPlayer.pauseVideo());
   const paused = await page.evaluate(() => (window as any).testPlayer.getCurrentTime());
   await page.waitForTimeout(350);
   expect(await page.evaluate(() => (window as any).testPlayer.getCurrentTime())).toBe(paused);
   const another = captions(FIRST)[2];
   await moveToCue(page, another);
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
-  await panel(page, 'Controls').getByRole('button', { name: '聞き直す', exact: true }).click();
+  await page.evaluate(() => (window as any).testPlayer.playVideo());
   await expect.poll(() => page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(false);
   expect(await page.evaluate(() => (window as any).testPlayer.getCurrentTime())).toBeLessThan(another.start + 0.5);
   expect(await page.evaluate(() => (window as any).testPlayer.options.playerVars.controls)).toBe(1);
@@ -223,7 +232,7 @@ test('the ordinary web overlay uses imported IndexedDB hints, preserves tags acr
   await chooseVideo(page);
   await openVideo(page);
   await moveToCue(page, captions(FIRST)[0]);
-  await panel(page, 'Controls').getByRole('button', { name: '一時停止', exact: true }).click();
+  await page.evaluate(() => (window as any).testPlayer.pauseVideo());
   await keyboard(page).locator('.available').click();
   await expect(panel(page, 'Hint').locator('.selectable').filter({ hasText: 'Original test demonstrative.' })).toContainText('Original test demonstrative.');
   await panel(page, 'Hint').locator('.selectable').filter({ hasText: 'Original test demonstrative.' }).click();
@@ -239,26 +248,32 @@ test('the ordinary web overlay uses imported IndexedDB hints, preserves tags acr
   expect(await page.evaluate(() => (window as any).testPlayer.isPaused())).toBe(true);
 });
 
-test('demo explains the extension, loads EJDict by default and keeps playback actions in Controls', async ({ page }) => {
-  await mockYouTube(page);
-  await page.goto('/');
+test('demo keeps playback native, defaults to Japanese, switches answers and closes only the subtitle panel', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/');
   const notice = page.getByRole('region', { name: 'Chrome拡張機能版について', exact: true });
   await expect(notice).toContainText('デモページ');
+  await expect(page.locator('.playerShell > section').last()).toHaveAttribute('aria-label', 'Chrome拡張機能版について');
   for (const feature of ['Netflix', 'Prime Video', 'Bilibili', '中国語', 'オフライン', '日本語音声']) await expect(notice).toContainText(feature);
   await page.getByText('辞書設定', { exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: /辞書|EJDict/ })).toContainText('46,916', { timeout: 30_000 });
+  await expect(page.getByRole('status').filter({ hasText: /辞書|EJDict/ })).toContainText('46,916', { timeout: 30000 });
   await page.getByLabel('操作チュートリアル', { exact: true }).uncheck();
-  await chooseVideo(page);
-  await openVideo(page);
-  const controls = panel(page, 'Controls');
-  await expect(panel(page, 'Typing').getByRole('button')).toHaveCount(0);
-  await expect(controls.getByRole('button', { name: '一時停止', exact: true })).toBeVisible();
-  await controls.getByRole('checkbox', { name: '字幕を表示', exact: true }).uncheck();
-  await expect(subtitle(page)).toHaveText('字幕は非表示です');
-  await controls.getByRole('checkbox', { name: '字幕を表示', exact: true }).check();
+  await chooseVideo(page); await expectNormalPanels(page);
+  await expect.poll(() => page.evaluate(() => (window as any).testPlayer.getPlayerState())).toBe(1);
+  await page.evaluate(time => (window as any).testPlayer.seekTo(time), captions(FIRST)[0].start + 0.1);
+  await expect(panel(page, 'Subtitle').getByRole('button', { name: '日本語', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(subtitle(page)).toContainText(/[\u3040-\u30ff\u4e00-\u9fff]/);
+  await panel(page, 'Subtitle').getByRole('button', { name: '英語（答え）', exact: true }).click();
   await expect(subtitle(page)).toHaveText(captions(FIRST)[0].text);
-  await controls.getByRole('button', { name: '一時停止', exact: true }).click();
-  await keyboard(page).locator('.available').click();
+  await page.evaluate(() => (window as any).testPlayer.pauseVideo());
+  await keyboard(page).focus(); await keyboard(page).pressSequentially('T');
+  await panel(page, 'Subtitle').getByRole('button', { name: 'Subtitleを閉じる', exact: true }).click();
+  await expect(panel(page, 'Subtitle')).toHaveCount(0);
+  await expect(keyboard(page).locator('.finished')).toHaveCount(1);
+  await panel(page, 'Config').getByRole('button', { name: 'Configを開く' }).click();
+  await panel(page, 'Config').getByRole('button', { name: '字幕ウィンドウを表示', exact: true }).click();
+  await expect(subtitle(page)).toHaveText(captions(FIRST)[0].text);
+  await panel(page, 'Config').getByRole('button', { name: 'Configを折りたたむ' }).click();
+  await keyboard(page).locator('.finished').click();
   await expect(panel(page, 'Hint').locator('.selectable').first()).toContainText(/[\u3040-\u30ff\u4e00-\u9fff]/);
 });
 
@@ -271,12 +286,14 @@ test('fullscreen can be selected before instant play and toggled back to the min
   await openVideo(page);
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
   await expect(page.locator('main.normalPractice')).toHaveClass(/display-fullscreen/);
-  await panel(page, 'Controls').getByRole('button', { name: 'ミニ画面にする', exact: true }).click();
+  // Headless Chromium does not synthesize the browser-chrome Esc action.
+  // Exercise the same native Fullscreen API transition directly.
+  await page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   await expect(page.locator('main.normalPractice')).toHaveClass(/display-mini/);
 });
 
-for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) test(`initial mini layout is visible without overlaps at ${viewport.width}x${viewport.height} and resets after dragging`, async ({ page }) => {
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) test(`initial mini layout is visible without overlaps at ${viewport.width}x${viewport.height} with centred captions above typing`, async ({ page }) => {
   await page.setViewportSize(viewport);
   await mockYouTube(page);
   await page.goto('/');
@@ -300,13 +317,13 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     const intersection = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
     expect(intersection, `${a.kind} and ${b.kind}`).toBe(0);
   }
-  const original = (await panel(page, 'Typing').boundingBox())!;
-  await page.mouse.move(original.x + 60, original.y + 18);
-  await page.mouse.down(); await page.mouse.move(original.x + 80, original.y + 40); await page.mouse.up();
-  if (await panel(page, 'Controls').getByRole('button', { name: 'Controlsを開く' }).isVisible()) await panel(page, 'Controls').getByRole('button', { name: 'Controlsを開く' }).click();
-  await panel(page, 'Controls').getByRole('button', { name: '配置をリセット', exact: true }).click();
-  await expect.poll(async () => Math.round((await panel(page, 'Typing').boundingBox())!.x)).toBe(Math.round(original.x));
-  await expect.poll(async () => Math.round((await panel(page, 'Typing').boundingBox())!.y)).toBe(Math.round(original.y));
+  const typingBox = (await panel(page, 'Typing').boundingBox())!;
+  const captionBox = (await panel(page, 'Subtitle').boundingBox())!;
+  expect(Math.abs(typingBox.x + typingBox.width / 2 - viewport.width / 2)).toBeLessThan(1);
+  expect(Math.abs(captionBox.x + captionBox.width / 2 - viewport.width / 2)).toBeLessThan(1);
+  expect(captionBox.y + captionBox.height).toBeLessThan(typingBox.y);
+  if (viewport.width > 1000) expect(Math.abs(captionBox.width - typingBox.width / 2)).toBeLessThan(1);
+
 });
 
 test('resizing an active practice reflows every panel without restoring stale geometry', async ({ page }) => {
@@ -322,4 +339,21 @@ test('resizing an active practice reflows every panel without restoring stale ge
         && boxes.every((a, i) => boxes.slice(i + 1).every(b => Math.min(a.right, b.right) <= Math.max(a.left, b.left) + 1 || Math.min(a.bottom, b.bottom) <= Math.max(a.top, b.top) + 1));
     })).toBe(true);
   }
+});
+
+test('the tutorial keeps unknown-word meaning selection usable before its dictionary and final steps', async ({ page }) => {
+  await mockYouTube(page); await page.goto('/'); await chooseVideo(page); await openVideo(page, true);
+  await page.evaluate(time => (window as any).testPlayer.seekTo(time), captions(FIRST)[0].start + 0.1);
+  await expect(keyboard(page).locator('.available')).toBeVisible();
+  await keyboard(page).focus(); await keyboard(page).pressSequentially('x');
+  await expect(page.locator('.normalTutorial')).toContainText('2 / 5');
+  await keyboard(page).pressSequentially('This', { delay: 30 });
+  await expect(page.locator('.normalTutorial')).toContainText('3 / 5');
+  await keyboard(page).press('u');
+  await expect(page.locator('.normalTutorial')).toContainText('辞書で当てはまる意味を選んで記録');
+  await panel(page, 'Hint').locator('.selectable').first().click();
+  await expect(page.locator('.normalTutorial')).toContainText('4 / 5');
+  await expect(keyboard(page).getByText('ignorance', { exact: true })).toBeVisible();
+  await keyboard(page).focus(); await keyboard(page).pressSequentially('b');
+  await expect(page.locator('.normalTutorial')).toContainText('5 / 5');
 });

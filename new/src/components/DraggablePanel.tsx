@@ -19,6 +19,8 @@ interface Props {
   storageScope?: string;
   layoutRevision?: number;
   minimumSize?: PanelSize;
+  onClose?: () => void;
+  reveal?: boolean;
   children: React.ReactNode;
 }
 
@@ -47,6 +49,8 @@ export function DraggablePanel({
   storageScope,
   layoutRevision = 0,
   minimumSize = DEFAULT_MINIMUM,
+  onClose,
+  reveal = false,
   children,
 }: Props) {
   const scope = storageScope ?? window.location.hostname;
@@ -99,6 +103,12 @@ export function DraggablePanel({
     }
     return () => { active = false; };
   }, [scope, kind, layoutRevision]);
+
+  useLayoutEffect(() => {
+    if (!reveal) return;
+    setIsMinimized(false);
+    apply(fit(positionRef.current, sizeRef.current, false));
+  }, [reveal]);
 
   useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {
@@ -225,6 +235,7 @@ export function DraggablePanel({
         }}
       >
         <span>{title}</span>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {minimizable ? <button
           type="button"
           aria-label={`${title}を${minimized ? '開く' : '折りたたむ'}`}
@@ -243,6 +254,9 @@ export function DraggablePanel({
             padding: '0 6px', font: 'inherit', cursor: 'pointer', lineHeight: '18px',
           }}
         >{minimized ? '+' : '−'}</button> : null}
+        {onClose && <button type="button" aria-label={`${title}を閉じる`} onMouseDown={event => event.stopPropagation()} onClick={onClose}
+          style={{ border: 0, background: 'transparent', color: 'inherit', fontSize: 20, padding: '0 4px', lineHeight: '20px', cursor: 'pointer' }}>×</button>}
+        </span>
       </div>
       <div
         hidden={minimized}

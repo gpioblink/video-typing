@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { OverlayApp } from './OverlayApp';
 import { PracticeTutorial } from './PracticeTutorial';
+import { createPracticeTutorialState, practiceTutorialReducer } from '../lib/practiceTutorial';
 import { RECOMMENDED_VIDEOS, type RecommendedVideo } from '../data/recommendedVideos';
 import { parseYouTubeId, type PracticeClip } from '../lib/clips';
 import { selectClipCues } from '../lib/clipSelection';
@@ -22,18 +23,20 @@ interface Selection {
   cues: SubtitleCue[];
   fileName: string;
   video?: RecommendedVideo;
+  displaySubtitle?: { fileName: string; cues: SubtitleCue[] };
 }
 interface OpenPractice {
   clip: PracticeClip;
   fileName: string;
   video?: RecommendedVideo;
+  displaySubtitle?: { fileName: string; cues: SubtitleCue[] };
   tutorial: boolean;
   run: number;
 }
-const TUTORIAL_KEY = 'video-typing-tutorial-v2';
+const TUTORIAL_KEY = 'video-typing-tutorial-v3';
 function learned() {
   try {
-    return localStorage.getItem(TUTORIAL_KEY) === 'done';
+    return ['done', 'dismissed'].includes(localStorage.getItem(TUTORIAL_KEY) || '');
   } catch {
     return false;
   }
@@ -112,6 +115,22 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         end: cue.end + video.subtitle.offsetSeconds,
       }));
       if (!cues.length) throw new Error('使用できる字幕がありません。');
+      let displaySubtitle: Selection['displaySubtitle'];
+      if (video.displaySubtitle) {
+        try {
+          const response = await fetch(video.displaySubtitle.url, { signal: controller.signal });
+          if (!response.ok) throw new Error('日本語字幕を読み込めませんでした。');
+          const text = await response.text();
+          if (text.length > 2_000_000) throw new Error('日本語字幕が大きすぎます。');
+          const translated = parseSubtitleFile(video.displaySubtitle.url, text).map(cue => ({
+            ...cue, start: cue.start + video.displaySubtitle!.offsetSeconds, end: cue.end + video.displaySubtitle!.offsetSeconds,
+          }));
+          if (translated.length) displaySubtitle = { fileName: video.displaySubtitle.url.split('/').pop()!, cues: translated };
+        } catch {
+          // The English question remains usable if an optional translation
+          // cannot be loaded. The language selector shows it as unavailable.
+        }
+      }
       await ensureDefaultDictionary().catch(() => undefined);
       if (current !== generation.current) return;
       const selected: Selection = {
@@ -120,6 +139,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         source: { kind: 'youtube', videoId: video.videoId },
         cues,
         fileName: video.subtitle.url.split('/').pop()!,
+        displaySubtitle,
         video,
       };
       open(selected, range.start, range.end);
@@ -148,6 +168,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
       setActive({
         clip,
         fileName: selected.fileName,
+        displaySubtitle: selected.displaySubtitle,
         video: selected.video,
         tutorial: withTutorial,
         run: ++run.current,
@@ -170,7 +191,6 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
         key={active.run}
         practice={active}
         displayMode={displayMode}
-        onDisplayModeChange={applyDisplayMode}
         onBack={() => {
           setActive(null);
           if (learned()) setWithTutorial(false);
@@ -191,7 +211,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
             </svg>
           </a>
         </header>
-        <section className="playerPanel extensionNotice" aria-label="Chrome拡張機能版について">
+        <section className="playerPanel extensionNotice" aria-label="Video Typingの特徴">
           <h2>好きな動画を、語学学習向けのタイピングゲームに</h2>
           <div className="learningFeatures">
             <section>
@@ -203,14 +223,7 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
               <p>「聞き取れなかった」「知らなかった」などの誤答理由を記録するので、あとから目的に合わせて必要な部分だけ再挑戦できます。復習用の単語帳は、Ankiなどに読み込める形式でエクスポートできます。</p>
             </section>
           </div>
-          <p><strong>こちらはChrome拡張機能版のデモページです。</strong> このページでは機能の一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
-          <ul>
-            <li>YouTubeのほか、Netflix・Prime Videoなど、さまざまな動画サイトに対応</li>
-            <li>Bilibiliなどの動画を使った中国語タイピングにも対応</li>
-            <li>動画・字幕・音声のローカルファイルを読み込み、オフラインでも学習可能</li>
-            <li>対応する動画では、誤答時に日本語音声へ切り替えて聞き直し可能</li>
-          </ul>
-          <a href="https://github.com/gpioblink/video-typing#readme" target="_blank" rel="noreferrer">拡張機能版の詳細・導入方法</a>
+
         </section>
         <section className="playerPanel practicePreferences" aria-label="開始前の設定">
           <fieldset className="displayMode">
@@ -422,6 +435,16 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
             <a href="options.html">字幕・辞書設定</a>
           </p>
         )}
+        <section className="playerPanel extensionNotice" aria-label="Chrome拡張機能版について">
+          <p><strong>こちらはChrome拡張機能版のデモページです。</strong> このページでは機能の一部を体験できます。すべての機能はChrome拡張機能版で利用できます。</p>
+          <ul>
+            <li>YouTubeのほか、Netflix・Prime Videoなど、さまざまな動画サイトに対応</li>
+            <li>Bilibiliなどの動画を使った中国語タイピングにも対応</li>
+            <li>動画・字幕・音声のローカルファイルを読み込み、オフラインでも学習可能</li>
+            <li>対応する動画では、誤答時に日本語音声へ切り替えて聞き直し可能</li>
+          </ul>
+          <a href="https://github.com/gpioblink/video-typing#readme" target="_blank" rel="noreferrer">拡張機能版の詳細・導入方法</a>
+        </section>
       </div>
     </main>
   );
@@ -430,13 +453,11 @@ export function QuickPlayApp({ youtubeEnabled = true }: { youtubeEnabled?: boole
 function NormalPractice({
   practice,
   displayMode,
-  onDisplayModeChange,
   onBack,
   onRetry,
 }: {
   practice: OpenPractice;
   displayMode: 'mini' | 'fullscreen';
-  onDisplayModeChange: (mode: 'mini' | 'fullscreen') => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -453,7 +474,8 @@ function NormalPractice({
   const [ready, setReady] = useState(false);
   const [showTutorial, setShowTutorial] = useState(practice.tutorial);
   const [didType, setDidType] = useState(false);
-  const [didReplay, setDidReplay] = useState(false);
+  const [reasonNeedsMeaning, setReasonNeedsMeaning] = useState(false);
+  const [tour, sendTourEvent] = useReducer(practiceTutorialReducer, undefined, createPracticeTutorialState);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const [layoutRevision, setLayoutRevision] = useState(0);
   useEffect(() => {
@@ -474,7 +496,10 @@ function NormalPractice({
     progressRef.current = progress;
     if (Object.values(progress).some((frame) => frame.finishedCharIds.length > 0)) setDidType(true);
   }, []);
-  const replayed = useCallback(() => setDidReplay(true), []);
+  const closeTutorial = useCallback(() => {
+    setShowTutorial(false);
+    try { localStorage.setItem(TUTORIAL_KEY, tour.stage === 'complete' ? 'done' : 'dismissed'); } catch { /* Optional persistence. */ }
+  }, [tour.stage]);
   const layout = useMemo(() => calculatePracticeLayout(viewport.width, viewport.height, displayMode), [viewport, displayMode]);
   useEffect(() => {
     const adapter =
@@ -513,14 +538,14 @@ function NormalPractice({
     };
   }, [clip, frames, range, targetId]);
   useEffect(() => {
-    if (complete && showTutorial && didType && didReplay) {
+    if (showTutorial && tour.stage === 'complete') {
       try {
         localStorage.setItem(TUTORIAL_KEY, 'done');
       } catch {
         /* Optional persistence. */
       }
     }
-  }, [complete, showTutorial, didType, didReplay]);
+  }, [showTutorial, tour.stage]);
   const typed = Object.values(progressRef.current).reduce(
     (sum, frame) => sum + frame.finishedCharIds.length,
     0,
@@ -539,6 +564,7 @@ function NormalPractice({
             <button className="playerButton" onClick={onBack}>
               クリップ選択に戻る
             </button>
+            <button type="button" className="helpButton" aria-label="操作案内" title="操作案内" onClick={() => { sendTourEvent({ type: 'reset' }); setShowTutorial(true); }}>?</button>
           </div>
         </header>
         <section className="videoStage">
@@ -565,29 +591,23 @@ function NormalPractice({
             <OverlayApp
               initialSubtitleCues={clip.cues}
               initialSubtitleFileName={practice.fileName}
+              displaySubtitleCues={practice.displaySubtitle?.cues}
+              displaySubtitleFileName={practice.displaySubtitle?.fileName}
               initialTypingProgress={emptyProgress}
               pageUrl={storageKey}
               targetId={targetId}
               shadowRoot={document.head}
               playbackRange={range}
               panelDefaults={layout.panels}
-              panelStorageScope={`web-practice-layout-v4:${displayMode}:${viewport.width < 760 ? 'narrow' : 'wide'}`}
+              panelStorageScope={`web-practice-layout-v5:${displayMode}:${viewport.width < 760 ? 'narrow' : 'wide'}`}
               layoutRevision={layoutRevision}
-              controlsExtra={<>
-                <div className="practiceControlActions">
-                  <button type="button" onClick={() => onDisplayModeChange(displayMode === 'mini' ? 'fullscreen' : 'mini')}>{displayMode === 'mini' ? '全画面にする' : 'ミニ画面にする'}</button>
-                  <button type="button" onClick={() => setLayoutRevision(value => value + 1)}>配置をリセット</button>
-                  <button type="button" onClick={() => setShowTutorial(true)}>操作案内</button>
-                  <button type="button" onClick={onRetry}>再挑戦</button>
-                </div>
-                {snapshot.status === 'blocked' && <p role="status">動画中央の再生ボタンからも開始できます。</p>}
-              </>}
               onTypingProgressChange={receiveProgress}
-              onReplay={replayed}
+              onTutorialEvent={sendTourEvent}
+              onReasonMeaningSelectionChange={setReasonNeedsMeaning}
             />
           )}
           {showTutorial && ready && !complete && (
-            <PracticeTutorial step={!didType && (snapshot.status === 'ready' || snapshot.status === 'blocked') ? 'play' : !didType ? 'type' : !didReplay ? 'replay' : 'finish'} onSkip={() => setShowTutorial(false)} />
+            <PracticeTutorial step={!didType && (snapshot.status === 'ready' || snapshot.status === 'blocked') ? 'play' : tour.stage} reasonNeedsMeaning={reasonNeedsMeaning} onSkip={closeTutorial} onNext={() => sendTourEvent({ type: 'confirm-dictionary' })} />
           )}
           {snapshot.status === 'loading' && (
             <p className="normalStatus" role="status">
@@ -611,9 +631,7 @@ function NormalPractice({
               <p>{typed} 文字入力しました。</p>
               {showTutorial && (
                 <p>
-                  {didType && didReplay
-                    ? 'チュートリアル完了'
-                    : '聞き直しも体験するとチュートリアル完了です。'}
+                  {tour.stage === 'complete' ? 'チュートリアル完了' : '誤入力した際には、誤答理由や辞書の使い方も案内します。'}
                 </p>
               )}
               <button className="playerButton primary" onClick={onRetry}>

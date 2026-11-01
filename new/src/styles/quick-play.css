@@ -16,8 +16,6 @@
 .normalYouTube iframe { min-width: 200px; min-height: 200px; }
 .normalCredit { position: fixed; left: 16px; bottom: 1px; font-size: 10px; white-space: nowrap; color: #a9b7b2; max-width: calc(100vw - 32px); overflow: auto; }
 .normalCredit a { color: inherit; }
-.practiceControlActions { display: flex; gap: 6px; flex-wrap: wrap; }
-.normalPractice [data-panel-kind=controls] button { padding: 4px 6px; font: inherit; font-size: 12px; }
 .normalStatus { position: fixed; top: 84px; left: 16px; z-index: 2147483647; }
 .normalResult, .normalError { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #182024; border: 1px solid #52615d; border-radius: 12px; padding: 24px; z-index: 2147483647; width: min(440px, calc(100vw - 32px)); text-align: center; }
 .normalResult button, .normalError button { margin: 8px; }
@@ -42,3 +40,10 @@
 .extensionNotice p { margin: 6px 0 10px; }
 .extensionNotice ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 28px; padding-left: 20px; margin: 8px 0 12px; }
 @media(max-width:700px) { .extensionNotice ul, .learningFeatures { grid-template-columns: 1fr; } }
+
+.helpButton { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; border: 1px solid #63766e; border-radius: 50%; background: transparent; color: #edf2ef; font-weight: 700; }
+.helpButton:hover, .helpButton:focus-visible { background: #24353d; outline: 2px solid #bfe5d7; outline-offset: 2px; }
+
+.normalPractice .playerHeader > div:first-child { flex: 1; min-width: 0; }
+.normalPractice .playerHeader p { max-width: 100%; }
+.normalPractice .playerHeader .playerActions { flex-wrap: nowrap; flex-shrink: 0; align-items: center; }
