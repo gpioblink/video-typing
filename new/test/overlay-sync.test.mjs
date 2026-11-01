@@ -300,3 +300,68 @@ test('a delayed normal pause preserves the current cue while a backwards seek st
   bridge.sample();
   assert.equal(timeline.externalSeeks(), 1, 'natural playback can never move backwards, even after a long poll interval');
 });
+
+test('observer-first and bridge-first polling both preserve an external seek before an old cue can loop', (t) => {
+  for (const observerFirst of [true, false]) {
+    const adapter = createAdapter();
+    adapter.paused = false;
+    adapter.seek = function (seconds) { this.requestedSeek = seconds; this.time = seconds; };
+    const bridge = registerPlaybackTarget(`test-poll-phase-${observerFirst}`, adapter, { start: 0, end: 60, pollIntervalMs: 60_000 });
+    let poll;
+    let observer;
+    let loopActive = true;
+    let externalSeeks = 0;
+    observer = observeOverlayTimeline(bridge.target, {
+      onSample(snapshot, event) {
+        if (loopActive && shouldReplayOverlayLoop(snapshot.currentTime, snapshot.duration, 20, bridge.target.paused, bridge.target.seeking, event)) observer.seek(10);
+      },
+      onExternalSeek() { loopActive = false; externalSeeks++; },
+      onUnavailable() {},
+      seek(seconds) { bridge.target.currentTime = seconds; },
+    }, { setInterval(callback) { poll = callback; return 123; }, clearInterval() {} });
+    t.after(() => { observer.dispose(); bridge.dispose(); });
+    adapter.time = 30;
+    if (observerFirst) { poll(); bridge.sample(); }
+    else { bridge.sample(); poll(); }
+    assert.equal(adapter.time, 30, observerFirst ? 'observer-first' : 'bridge-first');
+    assert.equal(externalSeeks, 1);
+    assert.equal(loopActive, false);
+  }
+});
+
+test('synchronous bridge sampling keeps ordinary internal loops internal without recursion', (t) => {
+  const adapter = createAdapter();
+  adapter.time = 19.9;
+  adapter.paused = false;
+  adapter.seek = function (seconds) { this.requestedSeek = seconds; this.time = seconds; };
+  const bridge = registerPlaybackTarget('test-synchronized-internal-loop', adapter, { start: 0, end: 60, pollIntervalMs: 60_000 });
+  let poll;
+  let observer;
+  let externalSeeks = 0;
+  observer = observeOverlayTimeline(bridge.target, {
+    onSample(snapshot, event) {
+      if (shouldReplayOverlayLoop(snapshot.currentTime, snapshot.duration, 20, bridge.target.paused, bridge.target.seeking, event)) observer.seek(10);
+    },
+    onExternalSeek() { externalSeeks++; },
+    onUnavailable() {},
+    seek(seconds) { bridge.target.currentTime = seconds; },
+  }, { setInterval(callback) { poll = callback; return 123; }, clearInterval() {} });
+  t.after(() => { observer.dispose(); bridge.dispose(); });
+  adapter.time = 20.1;
+  poll();
+  bridge.sample();
+  assert.equal(adapter.time, 10);
+  assert.equal(bridge.target.seeking, false);
+  assert.equal(externalSeeks, 0);
+});
+
+test('a failed synchronous sample releases its reentry guard for the next sample', (t) => {
+  const adapter = createAdapter();
+  const bridge = registerPlaybackTarget('test-synchronized-sample-error', adapter, { start: 0, end: 60, pollIntervalMs: 60_000 });
+  t.after(() => bridge.dispose());
+  adapter.getDuration = () => { throw new Error('metadata unavailable'); };
+  assert.throws(() => bridge.target.synchronize(), /metadata unavailable/);
+  adapter.getDuration = () => 60;
+  assert.doesNotThrow(() => bridge.target.synchronize());
+  assert.equal(bridge.target.duration, 60);
+});

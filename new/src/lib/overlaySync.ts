@@ -36,6 +36,11 @@ export function observeOverlayTimeline(
       dispose();
       return;
     }
+    // A registered iframe target must classify a clock jump first. Otherwise
+    // this observer's poll can rewind the old loop before the bridge's poll
+    // gets a chance to announce the external seek. Native videos have no hook.
+    video.synchronize?.();
+    if (disposed) return;
     callbacks.onSample({
       currentTime: Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0,
       duration: Number.isFinite(video.duration) ? Math.max(0, video.duration) : 0,

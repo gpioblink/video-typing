@@ -19,6 +19,8 @@ export interface MediaTarget extends EventTarget {
   /** Requested destination while an asynchronous adapter seek is in flight. */
   readonly pendingSeekTime?: number | null;
   readonly seekRange?: { start: number; end: number };
+  /** Classify pending clock changes before consumers make loop decisions. */
+  synchronize?(): void;
   play(): Promise<void>;
   pause(): void;
 }
@@ -53,6 +55,7 @@ export function registerPlaybackTarget(
   targets.get(targetId)?.dispose();
   const events = new EventTarget();
   let disposed = false;
+  let sampling = false;
   let seeking = false;
   let ended = false;
   let pendingSeek: number | null = null;
@@ -81,6 +84,7 @@ export function registerPlaybackTarget(
   }
 
   const target: MediaTarget = Object.assign(events, {
+    synchronize: sample,
     async play() {
       if (disposed) return;
       await controls.play();
@@ -133,42 +137,47 @@ export function registerPlaybackTarget(
   });
 
   function sample() {
-    if (disposed) return;
-    const now = Date.now();
-    const time = target.currentTime;
-    const elapsed = Math.max(0, (now - lastSampleAt) / 1000);
-    if (pendingSeek !== null) {
-      if (Math.abs(time - pendingSeek) < 0.25 || (requestedSeek !== null && now - requestedSeek.at > 5_000)) {
-        pendingSeek = null;
-        seeking = false;
-        emit('seeked');
+    if (disposed || sampling) return;
+    sampling = true;
+    try {
+      const now = Date.now();
+      const time = target.currentTime;
+      const elapsed = Math.max(0, (now - lastSampleAt) / 1000);
+      if (pendingSeek !== null) {
+        if (Math.abs(time - pendingSeek) < 0.25 || (requestedSeek !== null && now - requestedSeek.at > 5_000)) {
+          pendingSeek = null;
+          seeking = false;
+          emit('seeked');
+        }
+      } else if (!seeking && !isRequestedSeek(time)) {
+        // The iframe API has no seeking event. Detect jumps in its real clock,
+        // allowing normal progress, playback rates and delayed background polls.
+        // A pause event can arrive after a throttled polling interval. The
+        // media was still playing during that interval, so a normal forward
+        // advance must not release the cue as if the user had sought.
+        const couldHaveAdvanced = !target.paused || !lastPaused;
+        const expectedProgress = couldHaveAdvanced ? elapsed * Math.max(0.25, target.playbackRate, lastRate) : 0;
+        const delta = time - lastTime;
+        if (delta < -0.5 || delta > Math.max(0.5, expectedProgress * 1.5 + 0.25)) {
+          seeking = true;
+          emit('seeking');
+          seeking = false;
+          ended = false;
+          emit('seeked');
+        }
       }
-    } else if (!seeking && !isRequestedSeek(time)) {
-      // The iframe API has no seeking event. Detect jumps in its real clock,
-      // allowing normal progress, playback rates and delayed background polls.
-      // A pause event can arrive after a throttled polling interval. The
-      // media was still playing during that interval, so a normal forward
-      // advance must not release the cue as if the user had sought.
-      const couldHaveAdvanced = !target.paused || !lastPaused;
-      const expectedProgress = couldHaveAdvanced ? elapsed * Math.max(0.25, target.playbackRate, lastRate) : 0;
-      const delta = time - lastTime;
-      if (delta < -0.5 || delta > Math.max(0.5, expectedProgress * 1.5 + 0.25)) {
-        seeking = true;
-        emit('seeking');
-        seeking = false;
-        ended = false;
-        emit('seeked');
-      }
+      const duration = target.duration;
+      if (duration !== lastDuration) { lastDuration = duration; emit('durationchange'); }
+      const rate = target.playbackRate;
+      if (rate !== lastRate) { lastRate = rate; emit('ratechange'); }
+      const changed = time !== lastTime;
+      lastTime = time;
+      lastSampleAt = now;
+      lastPaused = target.paused;
+      if (changed) emit('timeupdate');
+    } finally {
+      sampling = false;
     }
-    const duration = target.duration;
-    if (duration !== lastDuration) { lastDuration = duration; emit('durationchange'); }
-    const rate = target.playbackRate;
-    if (rate !== lastRate) { lastRate = rate; emit('ratechange'); }
-    const changed = time !== lastTime;
-    lastTime = time;
-    lastSampleAt = now;
-    lastPaused = target.paused;
-    if (changed) emit('timeupdate');
   }
 
   const onPlaybackEvent = (event: PlaybackEvent) => {
