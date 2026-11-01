@@ -21,6 +21,7 @@ import {
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement, seekVideo } from '../lib/video';
 import { observeOverlayTimeline, shouldReplayOverlayLoop, type OverlayTimelineObserver } from '../lib/overlaySync';
+import { restartTypingProgress } from '../lib/practiceSession';
 import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
@@ -115,7 +116,7 @@ function OverlaySession({
   onReasonMeaningSelectionChange,
   onReplay,
   showClipResult = false,
-  typeReviewMode = false,
+  typeReviewMode: initialTypeReviewMode = false,
   onNativeCueReplay,
   onFrameCompleted,
   onDisplaySubtitleChange,
@@ -136,6 +137,9 @@ function OverlaySession({
     });
   }, [pageUrl]);
 
+  const [retryReviewMode, setRetryReviewMode] = useState(false);
+  const typeReviewMode = initialTypeReviewMode || retryReviewMode;
+  const [clipRetryError, setClipRetryError] = useState('');
   const subtitleCues = initialSubtitleCues;
   const subtitleFileName = initialSubtitleFileName;
   const typingFrames = initialTypingFrames;
@@ -154,6 +158,8 @@ function OverlaySession({
   const [subtitlesVisible, setSubtitlesVisible] = useState(true);
   const [subtitleLanguage, setSubtitleLanguage] = useState<'native' | 'answer'>(() => displaySubtitleCues?.length ? 'native' : 'answer');
   useEffect(() => { setSubtitleLanguage(nativeSubtitleState.cues?.length ? 'native' : 'answer'); }, [nativeSubtitleState.cues]);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const preferredPlaybackRateRef = useRef(1);
   const [clipComplete, setClipComplete] = useState(false);
   const clipCompleteRef = useRef(false);
   const allProgressRef = useRef(typingProgress);
@@ -239,7 +245,7 @@ function OverlaySession({
       return;
     }
 
-    video.playbackRate = 1;
+    video.playbackRate = preferredPlaybackRateRef.current;
     controlledPlaybackRateRef.current = null;
   }, [targetId]);
 
@@ -263,7 +269,7 @@ function OverlaySession({
       if (controlledPlaybackRateRef.current) {
         restoreControlledPlaybackRate(video);
       } else {
-        video.playbackRate = 1;
+        video.playbackRate = preferredPlaybackRateRef.current;
       }
       return;
     }
@@ -286,7 +292,7 @@ function OverlaySession({
 
     video.playbackRate = controlledPlaybackRate.loopIndex % 2 === 0
       ? SLOW_PLAYBACK_RATE
-      : 1;
+      : preferredPlaybackRateRef.current;
   }, [
     config.slowPlayback.enabled,
     config.slowPlayback.mistakeThreshold,
@@ -478,6 +484,7 @@ function OverlaySession({
         releaseLoop();
       },
       onSample: (snapshot, event) => {
+        setPlaybackRate(video.playbackRate);
         if (event === 'loadedmetadata') setIsVideoAvailable(true);
         if (showClipResult && playbackRange && snapshot.currentTime >= playbackRange.end && !clipCompleteRef.current) {
           const frames = typingFrames || subtitleCues.map(cue => ({ ...subtitleCueToCaptionFrame(cue), start: cue.start, end: cue.end }));
@@ -1154,6 +1161,19 @@ function OverlaySession({
             defaultMinimized
           >
             {!subtitlesVisible && <button type="button" onClick={() => setSubtitlesVisible(true)}>字幕ウィンドウを表示</button>}
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              再生速度
+              <select aria-label="再生速度" value={playbackRate} onChange={event => {
+                const rate = Number(event.target.value);
+                if (![0.5, 0.75, 1, 1.25, 1.5, 2].includes(rate)) return;
+                preferredPlaybackRateRef.current = rate;
+                controlledPlaybackRateRef.current = null;
+                const video = getVideoElement(targetId);
+                if (video) video.playbackRate = rate;
+              }}>
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+              </select>
+            </label>
             <ConfigPanel
               config={config}
               currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
@@ -1195,7 +1215,16 @@ function OverlaySession({
         </DraggablePanel>}
         {clipComplete && playbackRange ? <div role="status" style={{ position: 'fixed', left: 24, bottom: 24, pointerEvents: 'auto', padding: 20, background: '#162229', color: '#ecf2f1', borderRadius: 10 }}>
           <h2>クリップ完走</h2>
-          <button type="button" onClick={() => { clipCompleteRef.current = false; setClipComplete(false); setTypingProgress({}); setLoopCue(null); setActiveFrameResetRevision(revision => revision + 1); seekTo(playbackRange.start); void getVideoElement(targetId)?.play().catch(() => undefined); }}>この区間を再挑戦</button>
+          {clipRetryError ? <p role="alert">{clipRetryError}</p> : null}
+          <button type="button" onClick={() => { void (async () => {
+            const retryGeneration = nativeReplayGenerationRef.current;
+            const next = restartTypingProgress(allProgressRef.current);
+            for (const [id, progress] of Object.entries(next)) {
+              await saveStoredTypingProgress(pageUrl, id, progress);
+              if (retryGeneration !== nativeReplayGenerationRef.current) return;
+            }
+            clipCompleteRef.current = false; setClipComplete(false); setTypingProgress(next); setLoopCue(null); resetHintState(); setRetryReviewMode(true); setActiveFrameResetRevision(revision => revision + 1); seekTo(playbackRange.start); await getVideoElement(targetId)?.play();
+          })().catch(() => setClipRetryError('学習状態を保存できませんでした。もう一度お試しください。')); }}>この区間を再挑戦</button>
         </div> : null}
         {praise ? <PraiseOverlay key={praise.id} text={praise.text} /> : null}
       </div>
