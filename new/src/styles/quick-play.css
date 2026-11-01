@@ -1,0 +1,59 @@
+.clipCatalog{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.clipChoice{display:flex;align-items:center;gap:14px;text-align:left;border:1px solid #52615d;background:#1c2529;color:#edf2ef;border-radius:8px;padding:12px;min-height:92px}.clipChoice.selected{border-color:#d8efe5;box-shadow:0 0 0 1px #d8efe5}.clipChoice img{width:128px;aspect-ratio:16/9;object-fit:cover;border-radius:4px}.clipChoice span{display:grid;gap:6px}.clipChoice small{display:block;font-size:12px;color:#a9b7b2}.clipAttribution{font-size:12px;line-height:1.8}.clipAttribution a,a{color:#bfe5d7}.clipEditor label{display:flex;flex-direction:column;gap:6px;font-size:13px}.clipEditor input:not([type=checkbox]),.clipEditor select,details input:not([type=file]){padding:8px;background:#101417;color:#edf2ef;border:1px solid #52615d;border-radius:5px;min-width:0}.clipRange{display:flex;gap:18px;align-items:end;margin:16px 0;flex-wrap:wrap}.clipRange label{flex:1;min-width:180px}.clipRange select{max-width:100%;width:100%}.clipPreview{list-style:none;margin:20px 0;padding:0;max-height:230px;overflow:auto;border:1px solid #2d393d;border-radius:6px}.clipPreview li{display:flex;gap:18px;padding:10px 14px;border-bottom:1px solid #2d393d}.clipPreview time{color:#a9b7b2;font-variant-numeric:tabular-nums;font-size:12px;min-width:40px}.clipEditor .playerActions{align-items:center}.clipEditor .playerActions label{display:block}.playerPanel summary{cursor:pointer;font-weight:700}.playerPanel details label,details.playerPanel>label{display:flex;gap:10px;margin:15px 0;align-items:center}
+.practicePreferences { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.displayMode { display: flex; gap: 6px; margin: 0; padding: 0; border: 0; align-items: center; }
+.displayMode legend { float: left; margin-right: 12px; font-size: 13px; }
+.displayMode label { display: flex; align-items: center; gap: 6px; border: 1px solid #52615d; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+.displayMode label:has(input:checked) { background: #d8efe5; color: #17201d; border-color: #d8efe5; }
+.subtitleHelp { margin: 16px 0; font-size: 13px; line-height: 1.7; }
+.subtitleHelp pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #101417; padding: 12px; border-radius: 6px; }
+.normalPractice .videoStage { position: static; overflow: visible; }
+.normalPractice .playerHeader { height: 72px; min-height: 72px; position: relative; z-index: 2147483647; flex-direction: row; align-items: center; padding: 10px 16px; }
+.normalPractice .playerHeader h1 { font-size: 18px; }
+.normalPractice .playerHeader p { max-width: min(60vw, 800px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.normalPractice .playerHeader button { font-size: 12px; padding: 8px; white-space: nowrap; }
+.normalPlayerWindow { position: fixed; background: #000; }
+.normalPlayerWindow video, .normalYouTube, .normalYouTube iframe { width: 100%; height: 100%; display: block; }
+.normalYouTube iframe { min-width: 200px; min-height: 200px; }
+.normalCredit { position: fixed; left: 16px; bottom: 1px; font-size: 10px; white-space: nowrap; color: #a9b7b2; max-width: calc(100vw - 32px); overflow: auto; }
+.normalCredit a { color: inherit; }
+.normalStatus { position: fixed; top: 84px; left: 16px; z-index: 2147483647; }
+.normalResult, .normalError { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #182024; border: 1px solid #52615d; border-radius: 12px; padding: 24px; z-index: 2147483647; width: min(440px, calc(100vw - 32px)); text-align: center; }
+.normalResult button, .normalError button { margin: 8px; }
+@media(max-width:700px) {
+  .playerPage { padding: 12px; }
+  .playbackPage { padding: 0; }
+  .clipCatalog { grid-template-columns: 1fr; }
+  .clipChoice img { width: 90px; }
+  .practicePreferences { gap: 12px; }
+  .displayMode legend { margin-right: 4px; }
+  .displayMode label { padding: 8px; }
+}
+.extensionNotice { font-size: 13px; line-height: 1.65; }
+.demoHeader { flex-direction: row; align-items: center; }
+.repositoryLink { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; color: #edf2ef; }
+.repositoryLink:hover { background: #24353d; }
+.repositoryLink:focus-visible { outline: 2px solid #d8efe5; outline-offset: 3px; }
+.repositoryLink svg { display: block; }
+.learningFeatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 14px 0 18px; }
+.learningFeatures h3 { margin: 0 0 6px; font-size: 14px; color: #d8efe5; }
+.learningFeatures p { margin: 0; }
+.extensionNotice p { margin: 6px 0 10px; }
+.extensionNotice ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 28px; padding-left: 20px; margin: 8px 0 12px; }
+@media(max-width:700px) { .extensionNotice ul, .learningFeatures { grid-template-columns: 1fr; } }
+
+.helpButton { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; border: 1px solid #63766e; border-radius: 50%; background: transparent; color: #edf2ef; font-weight: 700; }
+.helpButton:hover, .helpButton:focus-visible { background: #24353d; outline: 2px solid #bfe5d7; outline-offset: 2px; }
+
+.normalPractice .playerHeader > div:first-child { flex: 1; min-width: 0; }
+.normalPractice .playerHeader p { max-width: 100%; }
+.normalPractice .playerHeader .playerActions { flex-wrap: nowrap; flex-shrink: 0; align-items: center; }
+
+.headerLinks { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.extensionStoreLink { position: static; }
+.iconTooltip { display: none; position: absolute; top: calc(100% + 8px); right: 0; z-index: 10; width: max-content; max-width: min(300px, calc(100vw - 24px)); padding: 9px 12px; background: #24353d; border: 1px solid #63766e; border-radius: 6px; color: #edf2ef; font: 13px/1.6 system-ui, sans-serif; text-align: left; box-shadow: 0 6px 20px #0008; }
+.extensionStoreLink:hover .iconTooltip, .extensionStoreLink:focus-visible .iconTooltip { display: block; }
+.deviceNotice { color: #e9dec3; border-color: #75684e; font-size: 13px; line-height: 1.65; }
+.deviceNotice p { margin: 0; }
+.deviceNotice p + p { margin-top: 6px; }
+.normalPractice .playerHeader h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media(max-width:700px) { .demoHeader h1 { font-size: 20px; } }

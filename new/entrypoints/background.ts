@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { searchChineseDictionary, searchDictionary } from '../src/lib/dictionary';
 import { HINT_DEBUG_BUILD_ID } from '../src/lib/hintDebug';
 import { isNetflixHostname } from '../src/lib/netflixSeek';
+import { validateClipRange, type ClipRange } from '../src/lib/clipLaunch';
 
 export default defineBackground(() => {
   console.log('[video-typing][hint][runtime-start]', {
@@ -25,7 +26,7 @@ export default defineBackground(() => {
       const url = String(message.url || '');
       const mode = message.mode === 'type-review' ? 'type-review' : 'typing';
 
-      void startOverlay(tabId, url, mode)
+      void startOverlay(tabId, url, mode, message.range)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({
           ok: false,
@@ -72,7 +73,9 @@ export default defineBackground(() => {
   });
 });
 
-async function startOverlay(tabId: number, url: string, mode: 'typing' | 'type-review') {
+async function startOverlay(tabId: number, url: string, mode: 'typing' | 'type-review', rangeInput?: unknown) {
+  const range = rangeInput === undefined ? undefined : validateClipRange(rangeInput);
+  if (range && mode !== 'typing') throw new Error('区間の起動は通常のタイピングで行ってください。');
   if (!tabId || !url || url.startsWith('chrome://')) {
     throw new Error('This tab cannot run video-typing.');
   }
@@ -87,10 +90,10 @@ async function startOverlay(tabId: number, url: string, mode: 'typing' | 'type-r
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: (launchOptions: { mode: 'typing' | 'type-review' }) => {
+    func: (launchOptions: { mode: 'typing' | 'type-review'; range?: ClipRange }) => {
       (window as any).__videoTypingPrototypeLaunchOptions__ = launchOptions;
     },
-    args: [{ mode }],
+    args: [{ mode, range }],
   });
 
   await chrome.scripting.executeScript({

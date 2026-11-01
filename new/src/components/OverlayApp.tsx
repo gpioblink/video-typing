@@ -4,6 +4,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfigPanel } from './ConfigPanel';
 import { DraggablePanel } from './DraggablePanel';
 import { SubtitlePanel } from './SubtitlePanel';
+import { findDisplaySubtitleCue } from '../lib/displaySubtitles';
+import type { PracticeTutorialEvent } from '../lib/practiceTutorial';
+import { createTypingFocusRef } from '../lib/typingFocus';
 import { Hint } from '../legacy-ui/Hint';
 import { Window } from '../legacy-ui/TypingPart/Window';
 import { searchExtensionChineseDictionary, searchExtensionDictionary } from '../lib/dictionaryClient';
@@ -17,9 +20,13 @@ import {
 } from '../lib/storage';
 import { emptyCaptionFrame, subtitleCueToCaptionFrame } from '../lib/subtitles';
 import { getVideoElement, seekVideo } from '../lib/video';
+import { observeOverlayTimeline, shouldReplayOverlayLoop, type OverlayTimelineObserver } from '../lib/overlaySync';
 import { HINT_DEBUG_BUILD_ID } from '../lib/hintDebug';
 import type {
   DictionaryWord,
+  PanelKind,
+  PanelPosition,
+  PanelSize,
   OverlayConfig,
   StoredFrameProgressData,
   StoredTypingProgressData,
@@ -46,6 +53,21 @@ interface Props {
     label: string;
   }>;
   showDebugPanel?: boolean;
+  playbackRange?: { start: number; end: number };
+  panelDefaults?: Partial<Record<PanelKind, {
+    position: PanelPosition;
+    size: PanelSize;
+    minimumSize?: PanelSize;
+    defaultMinimized?: boolean;
+  }>>;
+  panelStorageScope?: string;
+  layoutRevision?: number;
+  autoFocusTyping?: boolean;
+  onTypingProgressChange?: (progress: StoredTypingProgressData) => void;
+  onTutorialEvent?: (event: PracticeTutorialEvent) => void;
+  onReasonMeaningSelectionChange?: (active: boolean) => void;
+  onReplay?: () => void;
+  showClipResult?: boolean;
   typeReviewMode?: boolean;
   onNativeCueReplay?: (cue: SubtitleCue) => Promise<void> | void;
   onFrameCompleted?: (cue: SubtitleCue) => Promise<void> | void;
@@ -64,7 +86,17 @@ interface Props {
   shadowRoot: Node;
 }
 
-export function OverlayApp({
+export function OverlayApp(props: Props) {
+  // The local player reuses this component when changing history items. Each
+  // content identity needs fresh cue, hint and typing state and full cleanup.
+  const sessionKey = JSON.stringify([
+    props.targetId, props.playbackStorageKey || props.pageUrl,
+    props.initialSubtitleFileName, Boolean(props.typeReviewMode),
+  ]);
+  return <OverlaySession key={sessionKey} {...props} />;
+}
+
+function OverlaySession({
   initialSubtitleCues,
   initialSubtitleFileName,
   initialTypingProgress,
@@ -73,6 +105,16 @@ export function OverlayApp({
   displaySubtitleFileName,
   netflixSubtitleTracks,
   showDebugPanel = true,
+  playbackRange,
+  panelDefaults,
+  panelStorageScope,
+  layoutRevision,
+  autoFocusTyping = false,
+  onTypingProgressChange,
+  onTutorialEvent,
+  onReasonMeaningSelectionChange,
+  onReplay,
+  showClipResult = false,
   typeReviewMode = false,
   onNativeCueReplay,
   onFrameCompleted,
@@ -88,8 +130,8 @@ export function OverlayApp({
     console.log('[video-typing][hint][runtime-start]', {
       surface: 'overlay',
       buildId: HINT_DEBUG_BUILD_ID,
-      extensionId: chrome.runtime.id,
-      manifestVersion: chrome.runtime.getManifest().version,
+      extensionId: typeof chrome !== 'undefined' ? chrome.runtime?.id : undefined,
+      manifestVersion: typeof chrome !== 'undefined' ? chrome.runtime?.getManifest?.().version : undefined,
       pageUrl,
     });
   }, [pageUrl]);
@@ -98,6 +140,7 @@ export function OverlayApp({
   const subtitleFileName = initialSubtitleFileName;
   const typingFrames = initialTypingFrames;
   const [typingProgress, setTypingProgress] = useState<StoredTypingProgressData>(initialTypingProgress);
+  useEffect(() => { onTypingProgressChange?.(typingProgress); }, [typingProgress, onTypingProgressChange]);
   const [config, setConfig] = useState<OverlayConfig>(DEFAULT_OVERLAY_CONFIG);
   const [nativeSubtitleState, setNativeSubtitleState] = useState<{
     fileName?: string;
@@ -108,6 +151,14 @@ export function OverlayApp({
   });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [subtitlesVisible, setSubtitlesVisible] = useState(true);
+  const [subtitleLanguage, setSubtitleLanguage] = useState<'native' | 'answer'>(() => displaySubtitleCues?.length ? 'native' : 'answer');
+  useEffect(() => { setSubtitleLanguage(nativeSubtitleState.cues?.length ? 'native' : 'answer'); }, [nativeSubtitleState.cues]);
+  const [clipComplete, setClipComplete] = useState(false);
+  const clipCompleteRef = useRef(false);
+  const allProgressRef = useRef(typingProgress);
+  allProgressRef.current = typingProgress;
+  const [isVideoAvailable, setIsVideoAvailable] = useState(true);
   const [hintWords, setHintWords] = useState<DictionaryWord[]>([]);
   const [loopCue, setLoopCue] = useState<SubtitleCue | null>(null);
   const [isMistakeReasonPromptOpen, setIsMistakeReasonPromptOpen] = useState(false);
@@ -125,13 +176,23 @@ export function OverlayApp({
   const mistakeCountsRef = useRef<Record<string, number>>({});
   const activeFrameIdRef = useRef('');
   const nativeReplayCountRef = useRef(0);
+  const nativeReplayGenerationRef = useRef(0);
+  const timelineObserverRef = useRef<OverlayTimelineObserver | null>(null);
   const controlledPlaybackRateRef = useRef<{
     frameId: string;
     loopIndex: number;
   } | null>(null);
   const shouldResumeAfterMistakeReasonRef = useRef(false);
   const unknownHintSelectionHandlerRef = useRef<((word: DictionaryWord) => void) | null>(null);
+  const handleMeaningSelectionChange = useCallback((active: boolean) => {
+    setIsUnknownHintSelectionActive(active);
+    onReasonMeaningSelectionChange?.(active);
+  }, [onReasonMeaningSelectionChange]);
+  const handleMeaningSelectionHandler = useCallback((handler: ((word: DictionaryWord) => void) | null) => {
+    unknownHintSelectionHandlerRef.current = handler;
+  }, []);
   const praiseTimerRef = useRef<number | null>(null);
+  const typingKeyboardRef = useMemo(() => createTypingFocusRef(autoFocusTyping), [autoFocusTyping]);
 
   const cache = useMemo(() => {
     return createCache({
@@ -238,10 +299,12 @@ export function OverlayApp({
       return;
     }
 
+    const replayGeneration = nativeReplayGenerationRef.current;
     nativeReplayCountRef.current += 1;
     void replay
       .catch(() => undefined)
       .finally(() => {
+        if (replayGeneration !== nativeReplayGenerationRef.current) return;
         nativeReplayCountRef.current = Math.max(0, nativeReplayCountRef.current - 1);
 
         if (nativeReplayCountRef.current > 0) {
@@ -258,37 +321,14 @@ export function OverlayApp({
       });
   }, [applyMistakeSensitivePlaybackRate, restoreControlledPlaybackRate]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const video = getVideoElement(targetId);
-      if (!video) {
-        setCurrentTime(0);
-        setDuration(0);
-        return;
-      }
-
-      const loopRange = loopRangeRef.current;
-
-      if (loopRange && video.currentTime >= loopRange.end) {
-        const frameId = activeFrameIdRef.current;
-        const mistakeCount = frameId ? mistakeCountsRef.current[frameId] || 0 : 0;
-        if (frameId) {
-          applyMistakeSensitivePlaybackRate(frameId, mistakeCount, { advanceLoop: true });
-        }
-        seekVideo(targetId, loopRange.start);
-        setCurrentTime(loopRange.start);
-        setDuration(video.duration || 0);
-        return;
-      }
-
-      setCurrentTime(video.currentTime || 0);
-      setDuration(video.duration || 0);
-    }, 250);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [applyMistakeSensitivePlaybackRate, targetId]);
+  const seekTo = useCallback((requestedSeconds: number) => {
+    const seconds = playbackRange ? Math.max(playbackRange.start, Math.min(playbackRange.end, requestedSeconds)) : requestedSeconds;
+    if (timelineObserverRef.current) {
+      timelineObserverRef.current.seek(seconds);
+    } else {
+      seekVideo(targetId, seconds);
+    }
+  }, [targetId, playbackRange]);
 
   useEffect(() => {
     return () => {
@@ -315,8 +355,10 @@ export function OverlayApp({
   }, [pageUrl, playbackStorageKey]);
 
   const timelineCue = useMemo(() => {
-    return subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null;
-  }, [currentTime, subtitleCues]);
+    return isVideoAvailable
+      ? subtitleCues.find((cue) => cue.start <= currentTime && currentTime < cue.end) || null
+      : null;
+  }, [currentTime, isVideoAvailable, subtitleCues]);
 
   // Keep showing the cue currently being typed even while playback moves
   // into the padded pre/post-roll area around that cue.
@@ -326,16 +368,10 @@ export function OverlayApp({
     return activeCue ? findCueIndex(subtitleCues, activeCue) : -1;
   }, [activeCue, subtitleCues]);
 
-  const displayCue = useMemo(() => {
-    const displaySubtitleCues = nativeSubtitleState.cues;
-
-    if (!activeCue || !displaySubtitleCues?.length) {
-      return activeCue;
-    }
-
-    const cueTime = (activeCue.start + activeCue.end) / 2;
-    return displaySubtitleCues.find((cue) => cue.start <= cueTime && cueTime < cue.end) || activeCue;
-  }, [activeCue, nativeSubtitleState.cues]);
+  const displayCue = useMemo(
+    () => findDisplaySubtitleCue(activeCue, nativeSubtitleState.cues),
+    [activeCue, nativeSubtitleState.cues],
+  );
 
   const isTypingCueActive = useMemo(() => {
     if (!activeCue) {
@@ -416,6 +452,79 @@ export function OverlayApp({
     setIsUnknownHintSelectionActive(false);
   }, []);
 
+  useEffect(() => {
+    const video = getVideoElement(targetId);
+    if (!video) return;
+
+    const releaseLoop = () => {
+      // Netflix's native-audio replay deliberately seeks within the current
+      // cue. It owns that operation until its promise settles.
+      if (nativeReplayCountRef.current > 0) return;
+      loopRangeRef.current = null;
+      setLoopCue(null);
+      shouldResumeAfterMistakeReasonRef.current = false;
+      setIsMistakeReasonPromptOpen(false);
+      setActiveFrameResetRevision((revision) => revision + 1);
+      resetHintState();
+      restoreControlledPlaybackRate(video);
+    };
+    const observer = observeOverlayTimeline(video, {
+      seek: (seconds) => seekVideo(targetId, seconds),
+      onExternalSeek: releaseLoop,
+      onUnavailable: () => {
+        setIsVideoAvailable(false);
+        nativeReplayGenerationRef.current += 1;
+        nativeReplayCountRef.current = 0;
+        releaseLoop();
+      },
+      onSample: (snapshot, event) => {
+        if (event === 'loadedmetadata') setIsVideoAvailable(true);
+        if (showClipResult && playbackRange && snapshot.currentTime >= playbackRange.end && !clipCompleteRef.current) {
+          const frames = typingFrames || subtitleCues.map(cue => ({ ...subtitleCueToCaptionFrame(cue), start: cue.start, end: cue.end }));
+          if (frames.every(frame => frame.caption.filter(char => char.isTypeable).every(char => allProgressRef.current[frame.id]?.finishedCharIds.includes(char.id)))) {
+            clipCompleteRef.current = true;
+            loopRangeRef.current = null;
+            video.pause();
+            setClipComplete(true);
+            return;
+          }
+        }
+        const loopRange = loopRangeRef.current;
+        if (loopRange && shouldReplayOverlayLoop(
+          snapshot.currentTime, snapshot.duration, loopRange.end,
+          video.paused, video.seeking, event,
+        )) {
+          const frameId = activeFrameIdRef.current;
+          if (frameId) {
+            applyMistakeSensitivePlaybackRate(
+              frameId, mistakeCountsRef.current[frameId] || 0, { advanceLoop: true },
+            );
+          }
+          // Seek through the observer so this internal loop is not mistaken
+          // for a user's seek to another sentence.
+          timelineObserverRef.current?.seek(loopRange.start);
+          if (!video.paused) onReplay?.();
+          if (event === 'ended') void video.play().then(() => { if (!video.paused) onReplay?.(); }).catch(() => undefined);
+          return;
+        }
+        currentTimeRef.current = snapshot.currentTime;
+        setCurrentTime(snapshot.currentTime);
+        setDuration(snapshot.duration);
+      },
+    });
+    timelineObserverRef.current = observer;
+    return () => {
+      observer.dispose();
+      timelineObserverRef.current = null;
+    };
+  }, [applyMistakeSensitivePlaybackRate, resetHintState, restoreControlledPlaybackRate, targetId, playbackRange, showClipResult, subtitleCues, typingFrames, onReplay]);
+
+  useEffect(() => () => {
+    nativeReplayGenerationRef.current += 1;
+    nativeReplayCountRef.current = 0;
+    hintFrameGenerationRef.current += 1;
+  }, []);
+
   const isActiveFrameComplete = useMemo(() => {
     const typeableCharCount = activeFrame.caption.filter((char) => char.isTypeable).length;
 
@@ -460,8 +569,8 @@ export function OverlayApp({
 
     const loopPadding = typeReviewMode ? 0 : LOOP_START_PADDING_SECONDS;
     const loopEndPadding = typeReviewMode ? 0 : LOOP_END_PADDING_SECONDS;
-    const loopStart = Math.max(0, activeCue.start - loopPadding);
-    const loopEnd = activeCue.end + loopEndPadding;
+    const loopStart = Math.max(playbackRange?.start ?? 0, activeCue.start - loopPadding);
+    const loopEnd = Math.min(playbackRange?.end ?? Infinity, activeCue.end + loopEndPadding);
 
     loopRangeRef.current = {
       start: loopStart,
@@ -478,10 +587,11 @@ export function OverlayApp({
     restoreControlledPlaybackRate,
     subtitleCues,
     typeReviewMode,
+    playbackRange,
   ]);
 
   useEffect(() => {
-    if (!typeReviewMode || loopCue || timelineCue || subtitleCues.length === 0) {
+    if (!isVideoAvailable || !typeReviewMode || loopCue || timelineCue || subtitleCues.length === 0) {
       return;
     }
 
@@ -494,7 +604,7 @@ export function OverlayApp({
     const nextCue = subtitleCues.find((cue) => cue.start > currentTime + 0.05);
 
     if (nextCue) {
-      seekVideo(targetId, nextCue.start);
+      seekTo(nextCue.start);
       setCurrentTime(nextCue.start);
       return;
     }
@@ -511,6 +621,8 @@ export function OverlayApp({
     targetId,
     timelineCue,
     typeReviewMode,
+    isVideoAvailable,
+    seekTo,
   ]);
 
   const handleFinishedCharIdsChange = useCallback((finishedCharIds: string[]) => {
@@ -540,6 +652,7 @@ export function OverlayApp({
   }, [activeFrame.id, pageUrl]);
 
   const handleFrameInteracted = useCallback(() => {
+    onTutorialEvent?.({ type: 'input' });
     setTypingProgress((state) => {
       const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
       const nextFrameProgress = {
@@ -558,13 +671,14 @@ export function OverlayApp({
       void saveStoredTypingProgress(pageUrl, activeFrame.id, nextFrameProgress);
       return next;
     });
-  }, [activeFrame.id, pageUrl]);
+  }, [activeFrame.id, pageUrl, onTutorialEvent]);
 
   const handleMistakeInput = useCallback(() => {
     if (!activeCue) {
       return;
     }
 
+    onTutorialEvent?.({ type: 'mistake' });
     const nextCount = (mistakeCountsRef.current[activeFrame.id] || 0) + 1;
     mistakeCountsRef.current = {
       ...mistakeCountsRef.current,
@@ -580,6 +694,7 @@ export function OverlayApp({
     applyMistakeSensitivePlaybackRate,
     config,
     onNativeCueReplay,
+    onTutorialEvent,
     trackNativeReplay,
   ]);
 
@@ -666,6 +781,13 @@ export function OverlayApp({
     };
   }, []);
 
+  const recordedTagIds = useRef(new Set(Object.values(initialTypingProgress).flatMap(frame => frame.tags.map(tag => tag.id))));
+  useEffect(() => {
+    const tags = Object.values(typingProgress).flatMap(frame => frame.tags);
+    if (tags.some(tag => !recordedTagIds.current.has(tag.id))) onTutorialEvent?.({ type: 'reason-recorded' });
+    for (const tag of tags) recordedTagIds.current.add(tag.id);
+  }, [typingProgress, onTutorialEvent]);
+
   const handleTagsChange = useCallback((tags: Tag[]) => {
     setTypingProgress((state) => {
       const currentFrameProgress = state[activeFrame.id] || { finishedCharIds: [], tags: [], updatedAt: undefined };
@@ -710,6 +832,7 @@ export function OverlayApp({
     const nextMistakeCounts = { ...mistakeCountsRef.current };
     delete nextMistakeCounts[activeFrame.id];
     mistakeCountsRef.current = nextMistakeCounts;
+    nativeReplayGenerationRef.current += 1;
     nativeReplayCountRef.current = 0;
     shouldResumeAfterMistakeReasonRef.current = false;
     setIsMistakeReasonPromptOpen(false);
@@ -741,6 +864,7 @@ export function OverlayApp({
       cueText: targetCue.text,
     });
     resetHintState();
+    nativeReplayGenerationRef.current += 1;
     nativeReplayCountRef.current = 0;
     shouldResumeAfterMistakeReasonRef.current = false;
     loopRangeRef.current = null;
@@ -749,13 +873,14 @@ export function OverlayApp({
     setCurrentTime(targetCue.start);
     setActiveFrameResetRevision((revision) => revision + 1);
     restoreControlledPlaybackRate();
-    seekVideo(targetId, targetCue.start);
+    seekTo(targetCue.start);
   }, [
     activeCueIndex,
     resetHintState,
     restoreControlledPlaybackRate,
     subtitleCues,
     targetId,
+    seekTo,
   ]);
 
   const stopOverlayKeyboardEventPropagation = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -856,6 +981,7 @@ export function OverlayApp({
         });
         return merged;
       });
+      if (nextWords.length) onTutorialEvent?.({ type: 'dictionary-shown', frameId: requestedFrameId, query });
     };
     const trackSearch = (search: Promise<void>) => {
       setPendingHintSearchCount((count) => {
@@ -953,7 +1079,7 @@ export function OverlayApp({
         content: 'Dictionary search failed.',
       }]);
     }));
-  }, [activeCue?.text, activeFrame.id, typingFrames?.length]);
+  }, [activeCue?.text, activeFrame.id, typingFrames?.length, onTutorialEvent]);
 
   return (
     <CacheProvider value={cache}>
@@ -965,37 +1091,49 @@ export function OverlayApp({
       >
         <DraggablePanel
           kind="typing"
+          minimizable={Boolean(panelDefaults?.typing?.defaultMinimized)}
+          defaultMinimized={panelDefaults?.typing?.defaultMinimized}
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.typing?.minimumSize}
           title="Typing"
-          defaultPosition={{ x: 24, y: 220 }}
-          defaultSize={{ width: 760, height: 260 }}
+          defaultPosition={panelDefaults?.typing?.position || { x: 24, y: 220 }}
+          defaultSize={panelDefaults?.typing?.size || { width: 760, height: 260 }}
           titleBackground={isTypingCueActive ? '#1f7a3a' : '#162229'}
         >
           <Window
+            key={`${activeFrame.id}:${activeFrameResetRevision}`}
+            onKeyboardElementChange={typingKeyboardRef}
             frame={activeFrame}
             initialFinishedCharIds={activeProgress.finishedCharIds}
             resetRevision={activeFrameResetRevision}
             sendCompleted={handleFrameCompleted}
             requestExplanation={handleRequestExplanation}
             onMistakeInput={handleMistakeInput}
+            onMistakeWordCompleted={(query) => onTutorialEvent?.({ type: 'mistake-word-completed', frameId: activeFrame.id, query })}
             onMistakeReasonPromptOpen={handleMistakeReasonPromptOpen}
             onMistakeReasonPromptClose={handleMistakeReasonPromptClose}
             onFrameInteracted={handleFrameInteracted}
             onFinishedCharIdsChange={handleFinishedCharIdsChange}
             onTagsChange={handleTagsChange}
             hintWords={hintWords}
-            onUnknownHintSelectionActiveChange={setIsUnknownHintSelectionActive}
-            onUnknownHintSelectionHandlerChange={(handler) => {
-              unknownHintSelectionHandlerRef.current = handler;
-            }}
+            onUnknownHintSelectionActiveChange={handleMeaningSelectionChange}
+            onUnknownHintSelectionHandlerChange={handleMeaningSelectionHandler}
             onTypeReviewMistakeTagsCleared={handleTypeReviewMistakeTagsCleared}
             typeReviewMode={typeReviewMode}
           />
         </DraggablePanel>
         <DraggablePanel
           kind="hint"
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.hint?.minimumSize}
           title="Hint"
-          defaultPosition={{ x: 700, y: 120 }}
-          defaultSize={{ width: 360, height: 400 }}
+          reveal={hintWords.length > 0}
+          minimizable={Boolean(panelDefaults)}
+          defaultMinimized={panelDefaults?.hint?.defaultMinimized}
+          defaultPosition={panelDefaults?.hint?.position || { x: 700, y: 120 }}
+          defaultSize={panelDefaults?.hint?.size || { width: 360, height: 400 }}
         >
           <Hint
             words={hintWords}
@@ -1006,14 +1144,16 @@ export function OverlayApp({
         {showDebugPanel ? (
           <DraggablePanel
             kind="config"
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.config?.minimumSize}
             title="Config"
-            defaultPosition={{ x: 24, y: 24 }}
-            defaultSize={{ width: 380, height: 520 }}
+            defaultPosition={panelDefaults?.config?.position || { x: 24, y: 24 }}
+            defaultSize={panelDefaults?.config?.size || { width: 380, height: 520 }}
             minimizable
             defaultMinimized
-            closable
-            defaultClosed={false}
           >
+            {!subtitlesVisible && <button type="button" onClick={() => setSubtitlesVisible(true)}>字幕ウィンドウを表示</button>}
             <ConfigPanel
               config={config}
               currentCueNumber={activeCueIndex >= 0 ? activeCueIndex + 1 : null}
@@ -1031,17 +1171,32 @@ export function OverlayApp({
             />
           </DraggablePanel>
         ) : null}
-        <DraggablePanel
+        {subtitlesVisible && <DraggablePanel
           kind="subtitle"
+          minimizable={Boolean(panelDefaults?.subtitle?.defaultMinimized)}
+          defaultMinimized={panelDefaults?.subtitle?.defaultMinimized}
+          storageScope={panelStorageScope}
+          layoutRevision={layoutRevision}
+          minimumSize={panelDefaults?.subtitle?.minimumSize}
           title="Subtitle"
-          defaultPosition={{ x: 180, y: 520 }}
-          defaultSize={{ width: 520, height: 180 }}
+          onClose={() => setSubtitlesVisible(false)}
+          defaultPosition={panelDefaults?.subtitle?.position || { x: 180, y: 520 }}
+          defaultSize={panelDefaults?.subtitle?.size || { width: 520, height: 180 }}
         >
           <SubtitlePanel
-            cueText={displayCue?.text || ''}
-            fileName={nativeSubtitleState.fileName || subtitleFileName}
+            cueText={activeCue?.text || ''}
+            fileName={subtitleFileName}
+            nativeCueText={displayCue?.text}
+            nativeFileName={nativeSubtitleState.fileName}
+            hasNativeSubtitles={Boolean(nativeSubtitleState.cues?.length)}
+            language={subtitleLanguage}
+            onLanguageChange={setSubtitleLanguage}
           />
-        </DraggablePanel>
+        </DraggablePanel>}
+        {clipComplete && playbackRange ? <div role="status" style={{ position: 'fixed', left: 24, bottom: 24, pointerEvents: 'auto', padding: 20, background: '#162229', color: '#ecf2f1', borderRadius: 10 }}>
+          <h2>クリップ完走</h2>
+          <button type="button" onClick={() => { clipCompleteRef.current = false; setClipComplete(false); setTypingProgress({}); setLoopCue(null); setActiveFrameResetRevision(revision => revision + 1); seekTo(playbackRange.start); void getVideoElement(targetId)?.play().catch(() => undefined); }}>この区間を再挑戦</button>
+        </div> : null}
         {praise ? <PraiseOverlay key={praise.id} text={praise.text} /> : null}
       </div>
     </CacheProvider>
