@@ -217,7 +217,7 @@ function fakeYouTube() {
       players.push(this);
       queueMicrotask(() => options.events.onReady({ target: this }));
     }
-    cueVideoById(options) { this.cued = options; this.time = options.startSeconds; }
+    cueVideoById(options) { this.cued = options; this.time = options.startSeconds; queueMicrotask(() => this.options.events.onStateChange({ data: 5 })); }
     playVideo() { this.options.events.onStateChange({ data: 1 }); }
     pauseVideo() { this.options.events.onStateChange({ data: 2 }); }
     seekTo(seconds) { this.time = seconds; this.options.events.onStateChange({ data: 1 }); }

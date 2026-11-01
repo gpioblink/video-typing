@@ -12,6 +12,7 @@ export interface YouTubePlayer {
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number;
+  getPlayerState?(): number;
   getDuration(): number;
   getPlaybackRate(): number;
   setPlaybackRate(rate: number): void;
@@ -142,11 +143,17 @@ export function createYouTubeAdapter(
       container.append(mount);
       return new Promise<void>((resolve, reject) => {
         let settled = false;
+        let iframeReady = false;
+        let cueRequested = false;
+        let observedNonCued = false;
+        let cueTarget: YouTubePlayer | undefined;
+        let cuePoll: ReturnType<typeof setInterval> | undefined;
         const valid = () => !destroyed && currentGeneration === generation;
         const finish = (error?: Error, notify = true) => {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
+          clearInterval(cuePoll);
           cancelLoad = undefined;
           if (error) {
             if (notify && valid()) emit({ type: 'error', message: error.message });
@@ -158,6 +165,14 @@ export function createYouTubeAdapter(
             reject(error);
           } else resolve();
         };
+        const confirmCued = (fromEvent = false) => {
+          if (!valid() || settled || !iframeReady || !cueRequested) return;
+          const state = cueTarget?.getPlayerState?.();
+          if (!fromEvent && (!observedNonCued || state !== 5)) return;
+          ready = true;
+          emit({ type: 'ready' });
+          finish();
+        };
         const timeout = setTimeout(() => finish(new Error('YouTube player loading timed out.')), options.readyTimeoutMs ?? 15_000);
         cancelLoad = () => finish(new Error('YouTube loading was cancelled.'), false);
         try {
@@ -168,27 +183,48 @@ export function createYouTubeAdapter(
             playerVars: { enablejsapi: 1, playsinline: 1, controls: 1, origin, start, end },
             events: {
               onReady(event) {
-                if (!valid()) return;
+                if (!valid() || iframeReady) return;
                 try {
                   const iframe = event.target.getIframe();
                   iframe.title = 'YouTube video player';
                   iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+                  iframeReady = true;
+                  cueTarget = event.target;
+                  const initialState = event.target.getPlayerState?.();
+                  // Integer bounds already sent in playerVars need no second
+                  // cue when the constructor has completed that same queue.
+                  if (initialState === 5 && Number.isInteger(start) && Number.isInteger(end)
+                    && Math.abs(event.target.getCurrentTime() - start) < 0.25) {
+                    ready = true;
+                    emit({ type: 'ready' });
+                    finish();
+                    return;
+                  }
+                  cueRequested = true;
+                  observedNonCued = initialState !== 5;
                   event.target.cueVideoById({ videoId: source.videoId, startSeconds: start, endSeconds: end });
-                  ready = true;
-                  emit({ type: 'ready' });
-                  finish();
+                  // onReady only means the API accepts commands. Resolve after
+                  // CUED so a late cue cannot cancel the following playVideo.
+                  if (!settled && typeof event.target.getPlayerState === 'function') {
+                    cuePoll = setInterval(() => {
+                      if (event.target.getPlayerState?.() !== 5) observedNonCued = true;
+                      confirmCued();
+                    }, 50);
+                  }
                 } catch (error) {
                   finish(error instanceof Error ? error : new Error(String(error)));
                 }
               },
               onStateChange(event) {
                 if (!valid()) return;
+                if (cueRequested && event.data !== 5) observedNonCued = true;
                 const states: Record<number, PlaybackEvent['type']> = {
                   0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'ready',
                 };
                 playing = event.data === 1;
                 const type = states[event.data];
-                if (type) emit({ type });
+                if (event.data === 5 && !settled) confirmCued(true);
+                else if (type) emit({ type });
                 if (playing) finishPlay();
                 else if (event.data === 0 || event.data === 2) finishPlay(cancelError());
               },
