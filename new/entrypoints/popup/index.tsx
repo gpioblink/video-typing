@@ -193,6 +193,13 @@ function PopupApp() {
         <h1>Video Typing</h1>
       </header>
 
+      <section className="actions">
+        <button className="button primary" type="button" onClick={() => {
+          void chrome.tabs.create({ url: chrome.runtime.getURL('demo.html') });
+          window.close();
+        }}>おすすめをすぐプレイ · 40秒</button>
+      </section>
+
       <section>
         <h2 className="sectionTitle">現在再生中のビデオ</h2>
         <div className="videoCard">

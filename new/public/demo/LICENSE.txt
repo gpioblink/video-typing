@@ -1,0 +1,38 @@
+Video Typing original C109 demonstration media
+=============================================
+
+Files: first-steps.webm, a-quiet-morning.webm
+
+These are original procedural geometric animations and original practice
+sentences created for Video Typing. They contain no third-party videos,
+lyrics, subtitles, photographs, music, fonts, or prerecorded human voices.
+
+To the extent copyright or related rights apply, the authors dedicate the
+original animation, practice text, and generated recordings to the public
+domain under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Narration is synthesized locally with the default English formant voice of
+eSpeak NG (or eSpeak); it is not an impersonation of a particular person.
+eSpeak NG: https://github.com/espeak-ng/espeak-ng (GPL-3.0-or-later).
+Encoding uses FFmpeg: https://ffmpeg.org/.
+These tools are not bundled with the application. Their software licences
+remain unchanged; this dedication concerns the original generated media.
+
+Rebuild with: python3 new/scripts/generate-demo-media.py
+Requires Python 3, FFmpeg with VP9/Opus, and eSpeak NG or eSpeak.
+Each clip lasts 40 seconds. Four cues begin at 0, 10, 20, and 30 seconds;
+the corresponding narration begins 0.5 seconds into each cue. There are no
+burned-in answers. Encoding can differ between tool versions.
+
+first-steps:
+  Hello world.
+  Listen and type.
+  Small steps count.
+  You did it.
+
+a-quiet-morning:
+  The sun is warm.
+  A bird sings.
+  Take a deep breath.
+  Today is a new day.
